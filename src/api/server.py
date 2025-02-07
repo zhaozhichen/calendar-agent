@@ -1,5 +1,77 @@
 """
-Script to handle calendar agent server requests.
+FastAPI server implementation for the Calendar Agent system.
+
+This module provides the REST API endpoints for calendar management and meeting scheduling.
+
+Key Endpoints:
+    GET /:
+        - Root endpoint returning service status
+        - Used for health checks and version info
+
+    GET /agents:
+        - Lists all registered calendar agents
+        - Returns email addresses and status
+
+    POST /agents:
+        - Creates a new calendar agent
+        - Requires email and credentials
+        - Sets up Google Calendar integration
+
+    GET /agents/{email}/availability:
+        - Checks calendar availability for an agent
+        - Parameters:
+            - start_time: Start of time range
+            - end_time: End of time range
+        - Returns free/busy periods with details
+
+    POST /agents/{email}/meetings:
+        - Requests a new meeting
+        - Handles scheduling logic including:
+            - Priority evaluation
+            - Conflict detection
+            - Negotiation if needed
+        - Returns scheduling result or negotiation proposal
+
+    POST /agents/{email}/negotiate:
+        - Handles meeting negotiation
+        - Parameters:
+            - proposal_id: ID of the proposal to act on
+            - action: 'accept' or 'reject'
+        - Executes rescheduling if accepted
+
+    POST /agents/{email}/evaluate_priority:
+        - Evaluates meeting priority
+        - Uses factors like attendees, title, and type
+        - Returns priority score (1-5)
+
+Helper Functions:
+    - _validate_meeting_duration(): Checks if meeting duration is valid
+    - _validate_business_hours(): Ensures meeting is within business hours
+    - _format_busy_periods(): Formats calendar busy periods
+    - _format_no_slots_error(): Generates error message for no available slots
+    - _format_conflicts_info(): Formats conflict information for response
+    - _format_negotiation_message(): Creates user-friendly negotiation message
+
+Features:
+1. Input Validation:
+   - Validates all request parameters
+   - Ensures datetime format consistency
+   - Checks business hours constraints
+
+2. Error Handling:
+   - Provides detailed error messages
+   - Handles edge cases gracefully
+   - Returns appropriate HTTP status codes
+
+3. Response Formatting:
+   - Consistent JSON response structure
+   - Detailed success/error information
+   - Human-readable messages
+
+4. Security:
+   - Validates agent credentials
+   - Protects sensitive calendar data
+   - Ensures proper authorization
 """
 from datetime import datetime, timedelta
 import uuid

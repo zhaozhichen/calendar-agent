@@ -1,5 +1,40 @@
 """
 Base agent class for calendar coordination.
+
+This module implements the core calendar agent functionality for intelligent meeting scheduling.
+
+Key Classes:
+    - MeetingRequest: Data class representing a meeting request with properties:
+        - title: Meeting title
+        - duration_minutes: Length of meeting
+        - organizer: Email of meeting organizer
+        - attendees: List of attendee emails
+        - priority: Meeting priority (1-5)
+        - preferred_time_ranges: Optional preferred time slots
+        - description: Optional meeting description
+
+    - MeetingProposal: Data class representing a proposed meeting solution with properties:
+        - request: Original MeetingRequest
+        - proposed_start_time: Suggested meeting time
+        - conflicts: List of conflicting events that need to be moved
+        - affected_attendees: List of people affected by moves
+        - impact_score: Numerical score of scheduling impact
+
+    - CalendarAgent: Main agent class with methods:
+        - evaluate_meeting_priority(): Assigns priority (1-5) to meetings based on various factors
+        - find_meeting_slots(): Finds possible meeting times considering conflicts
+        - negotiate_meeting_time(): Handles rescheduling of conflicting meetings
+        - _prepare_moved_events(): Internal method to prepare rescheduling plan
+        - _delete_conflict(): Internal method to remove conflicting events
+        - _create_new_meeting(): Internal method to create the new meeting
+        - _create_rescheduled_events(): Internal method to recreate moved meetings
+
+The agent uses a sophisticated algorithm to:
+1. Evaluate meeting priorities based on attendees, title keywords, and meeting type
+2. Find available time slots considering all attendees' calendars
+3. Handle conflicts through priority-based negotiation
+4. Generate and execute rescheduling proposals when needed
+5. Maintain calendar consistency throughout the process
 """
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Tuple

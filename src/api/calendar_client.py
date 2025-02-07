@@ -1,5 +1,54 @@
 """
 Calendar API client implementation.
+
+This module provides a high-level interface for calendar operations with built-in
+timezone handling and business hours logic.
+
+Key Classes:
+    - CalendarClient: Main client class with methods:
+        - create_event(): Creates a new calendar event with specified parameters
+            - Handles timezone conversion to EST
+            - Validates business hours
+            - Supports priority levels
+            - Manages attendee lists
+        
+        - delete_event(): Removes an event from all participants' calendars
+            - Ensures consistent deletion across calendars
+            - Returns success/failure status
+        
+        - get_events(): Retrieves calendar events within a date range
+            - Supports filtering by calendar ID and owner
+            - Handles timezone conversion
+            - Returns events in consistent format
+        
+        - find_free_slots(): Finds available meeting times
+            - Considers business hours (9 AM - 5 PM EST)
+            - Checks all attendees' availability
+            - Returns possible slots with rationale
+            - Handles timezone-aware datetime objects
+
+Features:
+1. Timezone Management:
+   - All times are converted to EST for consistency
+   - Handles timezone-aware and naive datetime objects
+   - Maintains timezone information in responses
+
+2. Business Hours:
+   - Enforces 9 AM - 5 PM EST business hours
+   - Validates meeting durations against business hours
+   - Skips weekends in scheduling
+
+3. Event Management:
+   - Stores events per participant for efficient lookup
+   - Maintains consistency across multiple calendars
+   - Supports priority levels for meetings
+   - Handles attendee and organizer information
+
+4. Error Handling:
+   - Validates input parameters
+   - Provides detailed error messages
+   - Ensures data consistency
+   - Logs important operations for debugging
 """
 from typing import List, Dict, Any
 from datetime import datetime, timedelta
