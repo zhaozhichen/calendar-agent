@@ -1,0 +1,171 @@
+/* Main layout */
+body {
+    background-color: #f8f9fa;
+}
+
+/* Calendar customization */
+#calendar {
+    height: calc(100vh - 200px);
+    margin-top: 20px;
+}
+
+/* Event styling */
+.fc-event {
+    cursor: pointer;
+    position: relative;
+    padding: 4px 8px !important;
+    margin: 1px 0 !important;
+    border: none !important;
+    border-radius: 3px !important;
+}
+
+.fc-event-main-content {
+    padding: 2px;
+}
+
+/* Make text color consistent across all views */
+.fc-event-title,
+.fc-event-time,
+.fc-daygrid-event-dot,
+.fc-event .fc-event-main,
+.fc-daygrid-event .fc-event-title,
+.fc-timegrid-event .fc-event-title,
+.fc-daygrid-event .fc-event-time,
+.fc-timegrid-event .fc-event-time {
+    color: #333 !important;
+}
+
+/* Make event titles navy blue */
+.fc-event-title,
+.fc-daygrid-event .fc-event-title,
+.fc-timegrid-event .fc-event-title {
+    color: #000080 !important; /* Navy blue */
+}
+
+.fc-event-title {
+    font-weight: 500;
+    white-space: normal !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    display: -webkit-box !important;
+    -webkit-line-clamp: 2 !important;
+    -webkit-box-orient: vertical !important;
+}
+
+.fc-event-time {
+    font-size: 0.85em;
+    opacity: 0.8;
+}
+
+.fc-event:hover {
+    opacity: 0.9;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+/* Time grid specific styles */
+.fc-timegrid-event {
+    min-height: 25px !important;
+    padding: 4px 8px !important;
+}
+
+.fc-timegrid-event .fc-event-main {
+    padding: 0 !important;
+}
+
+/* Month view specific styles */
+.fc-daygrid-event {
+    margin: 1px 3px !important;
+}
+
+/* User colors - Background colors are now deeper */
+.user-alice { background-color: rgba(255, 107, 107, 0.3) !important; }  /* Coral Red */
+.user-bob { background-color: rgba(78, 205, 196, 0.3) !important; }    /* Turquoise */
+.user-charlie { background-color: rgba(69, 183, 209, 0.3) !important; } /* Sky Blue */
+.user-david { background-color: rgba(150, 206, 180, 0.3) !important; }   /* Sage Green */
+.user-eve { background-color: rgba(255, 238, 173, 0.3) !important; }     /* Light Yellow */
+
+/* Organizer dot colors - More vibrant */
+.dot-alice { background-color: rgb(255, 107, 107) !important; }
+.dot-bob { background-color: rgb(78, 205, 196) !important; }
+.dot-charlie { background-color: rgb(69, 183, 209) !important; }
+.dot-david { background-color: rgb(150, 206, 180) !important; }
+.dot-eve { background-color: rgb(255, 238, 173) !important; }
+
+/* Form elements */
+.form-control:focus {
+    border-color: #0d6efd;
+    box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+}
+
+/* Loading indicator */
+.loading {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(255, 255, 255, 0.8);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+}
+
+.loading-spinner {
+    width: 3rem;
+    height: 3rem;
+}
+
+/* Alert messages */
+#alerts {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 1050;
+    max-width: 350px;
+}
+
+.alert {
+    margin-bottom: 10px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+}
+
+/* Modal customization */
+.modal-body {
+    max-height: calc(100vh - 200px);
+    overflow-y: auto;
+}
+
+/* Meeting details styling */
+.meeting-details strong {
+    display: inline-block;
+    min-width: 100px;
+    color: #666;
+}
+
+.meeting-details span {
+    color: #333;
+}
+
+/* Multiple select styling */
+select[multiple] {
+    height: 120px !important;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .d-flex.align-items-center {
+        flex-direction: column;
+        align-items: stretch !important;
+    }
+    
+    #agentSelect {
+        width: 100% !important;
+        margin-bottom: 10px;
+    }
+    
+    .btn {
+        width: 100%;
+        margin: 5px 0 !important;
+    }
+} 
