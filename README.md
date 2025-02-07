@@ -8,6 +8,8 @@ An intelligent calendar management system that uses AI agents to coordinate and 
 - Agent Communication: Inter-agent protocol for negotiating meeting times
 - Smart Scheduling: Intelligent rescheduling of lower priority meetings to accommodate important group meetings
 - Priority-based Decision Making: Evaluation of meeting priorities for optimal scheduling decisions
+- Demo Calendar: Built-in demo calendar for testing and demonstration purposes
+- Web Interface: Modern web interface for managing meetings and viewing schedules
 
 ## Setup
 
@@ -35,6 +37,13 @@ pip install -r requirements.txt
 GOOGLE_CALENDAR_CREDENTIALS_FILE=credentials.json
 ```
 
+5. Run the server locally:
+```bash
+python src/run_server.py
+```
+
+The server will start at http://localhost:8000
+
 ## Project Structure
 
 ```
@@ -60,6 +69,38 @@ To run with coverage:
 ```bash
 pytest --cov=src tests/
 ```
+
+## Deployment to Render
+
+1. Fork this repository to your GitHub account
+
+2. Create a new Web Service on Render:
+   - Go to https://dashboard.render.com
+   - Click "New +" and select "Web Service"
+   - Connect your GitHub repository
+   - Choose the repository and branch
+
+3. Configure the Web Service:
+   - Name: calendar-agent (or your preferred name)
+   - Environment: Python
+   - Build Command: `pip install -r requirements.txt`
+   - Start Command: `python src/run_server.py`
+   - Select Free plan
+
+4. Click "Create Web Service"
+
+The service will be automatically deployed and available at your Render URL.
+
+## Demo Mode
+
+The system runs in demo mode with pre-configured test users:
+- alice@example.com
+- bob@example.com
+- charlie@example.com
+- david@example.com
+- eve@example.com
+
+You can use these test accounts to try out the scheduling features.
 
 ## Meeting Scheduling System
 

@@ -83,6 +83,7 @@ from typing import List, Dict, Any, Optional, Tuple
 import os
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 # Add the project root directory to Python path
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
@@ -94,7 +95,16 @@ from src.constants import EST, BUSINESS_START_HOUR, BUSINESS_END_HOUR
 from src.init_test_data import create_test_data
 
 # Initialize FastAPI app
-app = FastAPI()
+app = FastAPI(title="Calendar Agent API")
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
+)
 
 # Pydantic model for meeting request
 class MeetingRequest(BaseModel):

@@ -20,13 +20,15 @@ logging.basicConfig(
 
 def main():
     """Run the FastAPI server."""
+    # Get port from environment variable or use default
+    port = int(os.environ.get("PORT", 8000))
+    
     uvicorn.run(
         "api.server:app",
-        host="localhost",
-        port=8000,
-        reload=True,
+        host="0.0.0.0",  # Allow external access
+        port=port,
         workers=1,
-        log_level="debug"
+        log_level="info"
     )
 
 if __name__ == "__main__":
