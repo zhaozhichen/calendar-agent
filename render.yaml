@@ -3,7 +3,7 @@ services:
     name: calendar-agent
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: python src/run_server.py
+    startCommand: uvicorn src.api.server:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
         value: 3.10.0
