@@ -373,6 +373,15 @@ negotiationDialog.innerHTML = `
                     <div id="targetMeetingAttendees" class="mb-2"></div>
                     <div id="targetMeetingPriority" class="mb-2"></div>
                 </div>
+                <div class="d-flex align-items-center justify-content-between mb-3">
+                    <button type="button" class="btn btn-outline-secondary" id="prevConflict" disabled>
+                        <i class="bi bi-chevron-left"></i>
+                    </button>
+                    <h6 class="text-primary mb-0">Conflict <span id="currentConflictIndex">1</span> of <span id="totalConflicts">1</span></h6>
+                    <button type="button" class="btn btn-outline-secondary" id="nextConflict" disabled>
+                        <i class="bi bi-chevron-right"></i>
+                    </button>
+                </div>
                 <div id="negotiationDetails"></div>
                 <div class="mt-3">
                     <p>How would you like to proceed?</p>
@@ -392,8 +401,10 @@ negotiationDialog.innerHTML = `
 `;
 document.body.appendChild(negotiationDialog);
 
-// Add negotiation state variable
+// Add negotiation state variables
 let currentNegotiation = null;
+let currentConflictIndex = 0;
+let allProposals = [];
 
 // Function to format conflicts for display
 function formatConflicts(conflicts) {
@@ -428,9 +439,55 @@ function formatConflicts(conflicts) {
         ).join('');
 }
 
+// Function to update navigation buttons
+function updateNavigationButtons() {
+    const prevButton = document.getElementById('prevConflict');
+    const nextButton = document.getElementById('nextConflict');
+    const currentIndexSpan = document.getElementById('currentConflictIndex');
+    const totalConflictsSpan = document.getElementById('totalConflicts');
+    
+    prevButton.disabled = currentConflictIndex === 0;
+    nextButton.disabled = currentConflictIndex >= allProposals.length - 1;
+    
+    currentIndexSpan.textContent = currentConflictIndex + 1;
+    totalConflictsSpan.textContent = allProposals.length;
+}
+
 // Function to show negotiation dialog
 function showNegotiationDialog(proposal) {
     currentNegotiation = proposal;
+    currentConflictIndex = 0;
+    allProposals = [proposal]; // Initialize with the first proposal
+    
+    // Fetch all available proposals
+    fetch(`${API_BASE_URL}/agents/${proposal.organizer}/meetings`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            title: proposal.title,
+            duration_minutes: proposal.duration_minutes,
+            organizer: proposal.organizer,
+            attendees: proposal.attendees,
+            priority: proposal.priority,
+            description: proposal.description,
+            preferred_time_ranges: [
+                [proposal.start_time, new Date(new Date(proposal.start_time).getTime() + proposal.duration_minutes * 60000).toISOString()]
+            ]
+        })
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.proposals) {
+            allProposals = result.proposals;
+            updateNavigationButtons();
+        }
+    })
+    .catch(error => {
+        console.error('Error fetching proposals:', error);
+    });
+    
     const proposedDateTime = new Date(proposal.start_time);
     const endDateTime = new Date(proposedDateTime.getTime() + proposal.duration_minutes * 60000);
     
@@ -469,6 +526,25 @@ function showNegotiationDialog(proposal) {
             <p>${proposal.affected_attendees.join(', ')}</p>
         </div>
     `;
+    
+    // Set up navigation button handlers
+    document.getElementById('prevConflict').onclick = () => {
+        if (currentConflictIndex > 0) {
+            currentConflictIndex--;
+            currentNegotiation = allProposals[currentConflictIndex];
+            showNegotiationDialog(currentNegotiation);
+        }
+    };
+    
+    document.getElementById('nextConflict').onclick = () => {
+        if (currentConflictIndex < allProposals.length - 1) {
+            currentConflictIndex++;
+            currentNegotiation = allProposals[currentConflictIndex];
+            showNegotiationDialog(currentNegotiation);
+        }
+    };
+    
+    updateNavigationButtons();
     
     const modal = new bootstrap.Modal(document.getElementById('negotiationModal'));
     modal.show();

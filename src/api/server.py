@@ -528,7 +528,29 @@ async def request_meeting(email: str, request: MeetingRequest):
                 logging.info(f"{idx}. {p.proposed_start_time.strftime('%Y-%m-%d %I:%M %p')} "
                            f"- {slot_end.strftime('%I:%M %p')}")
             logging.info(f"\nSelected earliest perfect slot: {earliest_perfect.proposed_start_time.strftime('%Y-%m-%d %I:%M %p')}")
-            best_proposal = earliest_perfect
+            
+            # Create event directly
+            event = calendar_client.create_event(
+                summary=request.title,
+                start_time=earliest_perfect.proposed_start_time,
+                end_time=earliest_perfect.proposed_start_time + timedelta(minutes=request.duration_minutes),
+                description=request.description,
+                attendees=all_attendees,
+                organizer=request.organizer,
+                priority=request.priority
+            )
+            
+            if event:
+                return {
+                    "status": "success",
+                    "message": f"Successfully scheduled meeting '{request.title}' at {earliest_perfect.proposed_start_time.strftime('%Y-%m-%d %I:%M %p')}",
+                    "event": event
+                }
+            else:
+                return {
+                    "status": "error",
+                    "message": "Failed to create event"
+                }
         else:
             # No perfect slots - rank feasible slots by impact score
             feasible_proposals = []
@@ -543,154 +565,47 @@ async def request_meeting(email: str, request: MeetingRequest):
                         break
                 
                 if all_movable:
-                    feasible_proposals.append(p)
-                    conflict_details = [
-                        f"- {c['title']} (Priority: {c.get('priority', 'N/A')}) "
-                        f"with {len(c['attendees'])} attendees"
-                        for c in p.conflicts
-                    ]
-                    logging.info(
-                        f"\nSlot: {p.proposed_start_time.strftime('%Y-%m-%d %I:%M %p')}\n"
-                        f"Impact Score: {p.impact_score}\n"
-                        f"Conflicts:\n" + "\n".join(conflict_details)
-                    )
+                    # Format conflicts information for this proposal
+                    conflicts_info, attendee_conflicts = _format_conflicts_info(p.conflicts, all_attendees)
+                    
+                    # Create proposal object
+                    proposal = {
+                        "id": str(uuid.uuid4()),
+                        "title": request.title,
+                        "start_time": p.proposed_start_time.isoformat(),
+                        "duration_minutes": request.duration_minutes,
+                        "organizer": request.organizer,
+                        "attendees": all_attendees,
+                        "conflicts": conflicts_info,
+                        "affected_attendees": p.affected_attendees,
+                        "priority": request.priority,
+                        "description": request.description,
+                        "impact_score": p.impact_score
+                    }
+                    feasible_proposals.append(proposal)
+                    
+                    # Store in active negotiations
+                    active_negotiations[proposal["id"]] = proposal
             
             if not feasible_proposals:
                 error_msg = "No feasible slots found - all potential slots have unmovable conflicts"
                 logging.error(error_msg)
                 return {"status": "error", "message": error_msg}
             
-            # Sort feasible proposals by impact score
-            feasible_proposals.sort(key=lambda p: p.impact_score)
-            logging.info("\nRanked feasible slots by impact score:")
-            for idx, p in enumerate(feasible_proposals, 1):
-                logging.info(
-                    f"{idx}. {p.proposed_start_time.strftime('%Y-%m-%d %I:%M %p')} "
-                    f"- Impact Score: {p.impact_score} "
-                    f"- Conflicts: {len(p.conflicts)} "
-                    f"- Affected Attendees: {len(p.affected_attendees)}"
-                )
+            # Sort proposals by impact score
+            feasible_proposals.sort(key=lambda p: p["impact_score"])
             
+            # Format negotiation message for the best proposal
             best_proposal = feasible_proposals[0]
-            logging.info(f"\nSelected best feasible slot with lowest impact score: {best_proposal.impact_score}")
-
-        # Get proposed times in local timezone
-        proposed_start = best_proposal.proposed_start_time.astimezone()
-        proposed_end = (proposed_start + timedelta(minutes=request.duration_minutes)).astimezone()
-        
-        logging.info(f"\nProceeding with slot: {proposed_start.strftime('%I:%M %p')} - {proposed_end.strftime('%I:%M %p')}")
-        
-        # Validate business hours constraints
-        hours_error = _validate_business_hours(proposed_start, proposed_end)
-        if hours_error:
-            return hours_error
-
-        if not best_proposal.conflicts:
-            # Double check for any conflicts at the proposed time
-            all_conflicts = []
-            for attendee in all_attendees:
-                events = calendar_client.get_events(proposed_start, proposed_end, owner_email=attendee)
-                for event in events:
-                    event_start = datetime.fromisoformat(event['start']['dateTime']).astimezone()
-                    event_end = datetime.fromisoformat(event['end']['dateTime']).astimezone()
-                    
-                    # Check for overlap
-                    if (event_start < proposed_end and event_end > proposed_start):
-                        all_conflicts.append({
-                            'title': event['summary'],
-                            'attendee': attendee,
-                            'start': event_start,
-                            'end': event_end
-                        })
-            
-            if all_conflicts:
-                error_msg = "Found unexpected conflicts:\n"
-                for conflict in all_conflicts:
-                    error_msg += f"- {conflict['title']} with {conflict['attendee']} "
-                    error_msg += f"({conflict['start'].strftime('%I:%M %p')} - {conflict['end'].strftime('%I:%M %p')})\n"
-                logging.error(error_msg)
-                return {
-                    "status": "error",
-                    "message": f"Cannot schedule meeting due to conflicts:\n{error_msg}"
-                }
-            
-            # No conflicts found, safe to schedule
-            event = calendar_client.create_event(
-                summary=request.title,
-                start_time=proposed_start,
-                end_time=proposed_end,
-                description=request.description,
-                attendees=all_attendees,  # Use the combined list
-                organizer=request.organizer,
-                priority=request.priority  # Add priority to the event
-            )
-            success_msg = (
-                f"Successfully scheduled meeting '{request.title}' for "
-                f"{proposed_start.strftime('%Y-%m-%d %I:%M %p')} - {proposed_end.strftime('%I:%M %p')}"
-            )
-            logging.info(success_msg)
-            return {
-                "status": "success",
-                "message": success_msg,
-                "event": event
-            }
-        else:
-            # Need negotiation
-            proposal_id = str(uuid.uuid4())
-            
-            logging.info("\n=== Slot Availability Analysis ===")
-            logging.info(f"Searching for available slots between {start_local.strftime('%Y-%m-%d')} and {end_local.strftime('%Y-%m-%d')}")
-            logging.info(f"Required duration: {request.duration_minutes} minutes")
-            logging.info(f"Meeting priority: {request.priority}")
-            
-            # Log perfect slots if any were found but not selected
-            perfect_slots = [p for p in proposals if not p.conflicts]
-            if perfect_slots:
-                logging.info("\nPerfect slots were found but not selected (likely outside preferred time range):")
-                for slot in perfect_slots:
-                    logging.info(f"- {slot.proposed_start_time.strftime('%Y-%m-%d %I:%M %p')} - "
-                               f"{(slot.proposed_start_time + timedelta(minutes=request.duration_minutes)).strftime('%I:%M %p')}")
-            else:
-                logging.info("\nNo perfect slots found - negotiation will be required.")
-            
-            logging.info("\n=== Negotiation Required ===")
-            logging.info(f"Selected best proposal with conflicts:")
-            logging.info(f"Proposed time: {proposed_start.strftime('%I:%M %p')} - {proposed_end.strftime('%I:%M %p')}")
-            logging.info(f"Number of conflicts: {len(best_proposal.conflicts)}")
-            logging.info("Conflicting meetings:")
-            for conflict in best_proposal.conflicts:
-                logging.info(f"- Meeting: {conflict['title']}")
-                logging.info(f"  Current time: {conflict['start'].strftime('%I:%M %p')} - {conflict['end'].strftime('%I:%M %p')}")
-                logging.info(f"  New time: {conflict['new_slot_start'].strftime('%I:%M %p')} - {conflict['new_slot_end'].strftime('%I:%M %p')}")
-                logging.info(f"  Priority: {conflict.get('priority', 'N/A')}")
-                logging.info(f"  Attendees: {', '.join(conflict['attendees'])}\n")
-            
-            # Format conflicts information
-            conflicts_info, attendee_conflicts = _format_conflicts_info(best_proposal.conflicts, all_attendees)
-            
-            # Store negotiation details
-            active_negotiations[proposal_id] = {
-                "id": proposal_id,
-                "title": request.title,
-                "start_time": best_proposal.proposed_start_time.isoformat(),
-                "duration_minutes": request.duration_minutes,
-                "organizer": request.organizer,
-                "attendees": all_attendees,  # Use the combined list
-                "conflicts": conflicts_info,
-                "affected_attendees": best_proposal.affected_attendees,
-                "priority": request.priority,
-                "description": request.description  # Include the description
-            }
-            
-            # Format negotiation message
-            negotiation_msg = _format_negotiation_message(active_negotiations[proposal_id], attendee_conflicts)
+            negotiation_msg = _format_negotiation_message(best_proposal, attendee_conflicts)
             
             logging.info("\nNegotiation message prepared for user.")
             
             return {
                 "status": "needs_negotiation",
                 "message": negotiation_msg,
-                "proposal": active_negotiations[proposal_id]
+                "proposal": best_proposal,
+                "proposals": feasible_proposals  # Return all feasible proposals
             }
 
     except Exception as e:
