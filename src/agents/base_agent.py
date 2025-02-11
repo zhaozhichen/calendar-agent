@@ -203,6 +203,9 @@ class CalendarAgent:
                         conflicts = None
                         break
                         
+                    # Log full event data before creating conflict
+                    logging.info(f"Creating conflict from event: {json.dumps({k: v for k, v in event.items()}, default=str)}")
+                    
                     # Add conflict information
                     conflicts.append({
                         'id': event['id'],
@@ -211,9 +214,11 @@ class CalendarAgent:
                         'end': event_end,
                         'attendees': [a['email'] for a in event.get('attendees', [])],
                         'priority': event_priority,
+                        'description': event.get('description', ''),
                         'new_slot_start': None,  # Will be set if we find an alternative slot
                         'new_slot_end': None
                     })
+                    logging.info(f"Found conflict: {event['summary']}")
                     affected_attendees.update(a['email'] for a in event.get('attendees', []))
             
             # Skip this slot if we found an unmovable conflict
@@ -296,6 +301,7 @@ class CalendarAgent:
             Tuple of (success flag, dict of moved events)
         """
         moved_events = {}
+        rescheduled_events = []  # Initialize the list
         
         for conflict in proposal.conflicts:
             if conflict['priority'] > proposal.request.priority:
@@ -303,6 +309,10 @@ class CalendarAgent:
             
             # Format the original time for reference
             original_time = f"{conflict['start'].strftime('%I:%M %p')} - {conflict['end'].strftime('%I:%M %p')}"
+            
+            # Get and log the original description
+            original_description = conflict.get('description', '')
+            logging.info(f"\nPreparing to move event: {conflict['title']}")
             
             # Create the moved event
             moved_events[conflict['id']] = {
@@ -312,12 +322,14 @@ class CalendarAgent:
                 'end_time': conflict['new_slot_end'],
                 'attendees': conflict['attendees'],
                 'priority': conflict['priority'],
-                'original_time': original_time
+                'original_time': original_time,
+                'description': original_description
             }
             
-            logging.info(f"Original time: {conflict['start'].strftime('%Y-%m-%d %I:%M %p')} - {conflict['end'].strftime('%I:%M %p')}")
+            logging.info(f"Created moved_events entry for '{conflict['title']}'")
+            logging.info(f"Original time: {original_time}")
             logging.info(f"New time: {conflict['new_slot_start'].strftime('%I:%M %p')} - {conflict['new_slot_end'].strftime('%I:%M %p')}")
-        
+                
         return True, moved_events
 
     def _delete_conflict(self, conflict: Dict[str, Any]) -> bool:
@@ -330,7 +342,7 @@ class CalendarAgent:
             True if deletion was successful, False otherwise
         """
         logging.info(f"\nAttempting to delete conflict: {conflict['title']} (ID: {conflict['id']})")
-        logging.info(f"Original time: {conflict['start'].strftime('%Y-%m-%d %I:%M %p')} - {conflict['end'].strftime('%I:%M %p')} EST")
+        logging.info(f"Original time: {conflict['start'].strftime('%Y-%m-%d %I:%M %p')} - {conflict['end'].strftime('%I:%M %p')}")
         
         if self.calendar.delete_event(conflict['id']):
             logging.info(f"Successfully deleted original event: {conflict['title']} (ID: {conflict['id']})")
@@ -368,35 +380,40 @@ class CalendarAgent:
             List of created events with their IDs
         """
         rescheduled_events = []
-        # Use a dictionary to track unique meetings by their original ID
         processed_meetings = {}
         
         for conflict in conflicts:
-            # Skip if we've already processed this meeting
             if conflict['id'] in processed_meetings:
                 continue
                 
-            # Mark this meeting as processed
             processed_meetings[conflict['id']] = True
             
-            # Get the exact times from the conflict
             start_time = conflict['new_slot_start']
             end_time = conflict['new_slot_end']
+            
+            # Get and log the original description
+            original_description = conflict.get('description', '')
+            logging.info(f"Processing conflict: {conflict['title']}")
+            
+            # Format the new description with rescheduling note
+            new_description = f"{original_description}\n\n(Rescheduled from {conflict['start'].strftime('%I:%M %p')} - {conflict['end'].strftime('%I:%M %p')} due to conflict)"
             
             # Create the rescheduled event with exact times
             rescheduled = self.calendar.create_event(
                 summary=conflict['title'],
                 start_time=start_time,
                 end_time=end_time,
-                description=f"Rescheduled from {conflict['start'].strftime('%I:%M %p')} - {conflict['end'].strftime('%I:%M %p')} EST due to conflict",
+                description=new_description,
                 attendees=conflict['attendees'],
                 priority=conflict.get('priority', 'N/A')
             )
-            if rescheduled:  # Ensure event was created successfully
-                logging.info(f"Created rescheduled event: {conflict['title']} (ID: {rescheduled.get('id', 'unknown')}) at {start_time.strftime('%I:%M %p')} - {end_time.strftime('%I:%M %p')} EST")
+            
+            if rescheduled:
+                logging.info(f"Successfully created rescheduled event: {conflict['title']}")
                 rescheduled_events.append(rescheduled)
             else:
                 logging.error(f"Failed to create rescheduled event: {conflict['title']}")
+                
         return rescheduled_events
 
     def negotiate_meeting_time(self, proposal: MeetingProposal) -> Dict[str, Any]:
@@ -408,7 +425,6 @@ class CalendarAgent:
         Returns:
             Result of negotiation
         """
-        # First try to move all conflicting events
         can_move, moved_events = self._prepare_moved_events(proposal)
         
         if not can_move:
@@ -447,7 +463,10 @@ class CalendarAgent:
             
             # Now recreate all moved events in their new slots
             for event_id, event_data in moved_events.items():
-                description = f"Rescheduled from {event_data['original_time']} due to conflict"
+                original_description = event_data.get('description', '')
+                
+                # Format the description with rescheduling note
+                description = f"{original_description}\n\n(Rescheduled from {event_data['original_time']} due to conflict)"
                 
                 # Create the moved event
                 moved_event = self.calendar.create_event(
@@ -460,16 +479,13 @@ class CalendarAgent:
                 )
                 
                 if not moved_event:
-                    # If we fail to create a moved event, we should try to clean up
-                    self.calendar.delete_event(event['id'])  # Delete the new meeting
+                    self.calendar.delete_event(event['id'])
                     return {
                         "status": "error",
                         "message": f"Failed to create moved event for {event_data['title']}"
                     }
                 
-                logging.info(f"Moved event '{event_data['title']}' to "
-                            f"{event_data['start_time'].strftime('%I:%M %p')} - "
-                            f"{event_data['end_time'].strftime('%I:%M %p')}")
+                logging.info(f"Successfully recreated event '{event_data['title']}'")
             
             return {
                 "status": "success",

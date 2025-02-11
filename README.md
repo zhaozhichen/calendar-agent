@@ -2,6 +2,8 @@
 
 An intelligent calendar management system that uses AI agents to coordinate and optimize meeting schedules across multiple participants.
 
+Test server available at: https://calendar-agent.onrender.com
+
 ## Features
 
 - Smart Scheduling: Intelligent rescheduling of lower priority meetings to accommodate important group meetings

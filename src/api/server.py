@@ -395,7 +395,12 @@ def _format_conflicts_info(conflicts: List[Dict[str, Any]], all_attendees: List[
             "time": f"{conflict_start.strftime('%I:%M %p')} - {conflict_end.strftime('%I:%M %p')}",
             "attendees": conflict['attendees'],
             "priority": conflict.get('priority', 'N/A'),
-            "new_time": f"{new_slot_start.strftime('%I:%M %p')} - {new_slot_end.strftime('%I:%M %p')}"
+            "new_time": f"{new_slot_start.strftime('%I:%M %p')} - {new_slot_end.strftime('%I:%M %p')}",
+            "description": conflict.get('description', ''),  # Include the description
+            "start": conflict_start,
+            "end": conflict_end,
+            "new_slot_start": new_slot_start,
+            "new_slot_end": new_slot_end
         }
         conflicts_info.append(conflict_info)
         
@@ -673,7 +678,8 @@ async def request_meeting(email: str, request: MeetingRequest):
                 "attendees": all_attendees,  # Use the combined list
                 "conflicts": conflicts_info,
                 "affected_attendees": best_proposal.affected_attendees,
-                "priority": request.priority
+                "priority": request.priority,
+                "description": request.description  # Include the description
             }
             
             # Format negotiation message
@@ -696,103 +702,129 @@ async def request_meeting(email: str, request: MeetingRequest):
         logging.error(error_msg, exc_info=True)
         return {"status": "error", "message": error_msg}
 
-def parse_time_str(time_str: str, base_date: datetime.date) -> datetime:
-    """Parse time string in either 12-hour or 24-hour format."""
+def parse_time_str(time_str: str) -> datetime:
+    """Parse time string in format like '10:00 AM' to datetime."""
     try:
-        # First try 12-hour format (e.g., "3:15 PM")
-        dt = datetime.strptime(time_str, "%I:%M %p")
-        return datetime.combine(base_date, dt.time())
-    except ValueError:
-        try:
-            # Then try 24-hour format (e.g., "15:15")
-            dt = datetime.strptime(time_str, "%H:%M")
-            return datetime.combine(base_date, dt.time())
-        except ValueError:
-            # Finally try full datetime string
-            return datetime.fromisoformat(time_str)
+        return datetime.strptime(time_str.strip(), "%I:%M %p")
+    except ValueError as e:
+        logging.error(f"Error parsing time string '{time_str}': {e}")
+        raise
 
 @app.post("/agents/{email}/negotiate")
 async def negotiate_meeting(email: str, proposal_id: str, action: str):
     """Handle meeting negotiation."""
-    if action not in ["accept", "reject"]:
-        return {"status": "error", "message": "Invalid action"}
-        
-    if action == "reject":
-        return {"status": "success", "message": "Meeting proposal rejected"}
-        
     try:
-        # Get the proposal from cache
-        proposal = active_negotiations.get(proposal_id)
-        if not proposal:
-            return {"status": "error", "message": "Proposal not found or expired"}
-            
-        # Get the agent and calendar client
-        agent = CalendarAgent(email, calendar_client)
+        if proposal_id not in active_negotiations:
+            return {
+                "status": "error",
+                "message": "Invalid or expired negotiation ID"
+            }
         
-        # Parse the proposed times
-        proposed_start = datetime.fromisoformat(proposal["start_time"])
-        proposed_end = proposed_start + timedelta(minutes=proposal["duration_minutes"])
+        proposal = active_negotiations[proposal_id]
+        calendar_agent = CalendarAgent(email, calendar_client)
         
-        # Prepare conflicts with their original and new times
-        conflicts = []
-        for conflict in proposal.get("conflicts", []):
-            # Parse the original time range
-            original_time_parts = conflict["time"].split(" - ")
+        if action == "accept":
+            # Create MeetingProposal object from stored data
+            proposed_start = datetime.fromisoformat(proposal["start_time"])
+            proposed_end = proposed_start + timedelta(minutes=proposal["duration_minutes"])
             base_date = proposed_start.date()
-            conflict_start = parse_time_str(original_time_parts[0], base_date)
-            conflict_end = parse_time_str(original_time_parts[1], base_date)
             
-            # Parse the new time range
-            new_time_parts = conflict["new_time"].split(" - ")
-            new_start = parse_time_str(new_time_parts[0], base_date)
-            new_end = parse_time_str(new_time_parts[1], base_date)
-            
-            conflicts.append({
-                "id": conflict["id"],
-                "title": conflict["title"],
-                "start": conflict_start,
-                "end": conflict_end,
-                "new_slot_start": new_start,
-                "new_slot_end": new_end,
-                "attendees": conflict["attendees"],
-                "priority": conflict.get("priority", 3)
-            })
-        
-        # Import the correct MeetingRequest class
-        from src.agents.base_agent import MeetingRequest as AgentMeetingRequest
-        
-        # Execute the negotiation
-        result = agent.negotiate_meeting_time(MeetingProposal(
-            request=AgentMeetingRequest(
+            meeting_request = MeetingRequest(
                 title=proposal["title"],
                 duration_minutes=proposal["duration_minutes"],
                 organizer=proposal["organizer"],
                 attendees=proposal["attendees"],
                 priority=proposal["priority"],
-                description=proposal.get("description"),
-                preferred_time_ranges=[(proposed_start, proposed_end)]  # Use datetime objects directly
-            ),
-            proposed_start_time=proposed_start,
-            conflicts=conflicts,
-            affected_attendees=proposal["affected_attendees"],
-            impact_score=proposal.get("impact_score", 0)
-        ))
-        
-        if result["status"] == "success":
-            return {
-                "status": "success",
-                "message": "Meeting scheduled successfully",
-                "event": result["event"],
-                "rescheduled_meetings": result.get("moved_events", [])
-            }
+                preferred_time_ranges=[[proposed_start.isoformat(), proposed_end.isoformat()]]
+            )
+            
+            meeting_proposal = MeetingProposal(
+                request=meeting_request,
+                proposed_start_time=proposed_start,
+                conflicts=[{
+                    **conflict,
+                    'start': datetime.combine(base_date, parse_time_str(conflict['time'].split(' - ')[0]).time()),
+                    'end': datetime.combine(base_date, parse_time_str(conflict['time'].split(' - ')[1]).time()),
+                    'new_slot_start': datetime.combine(base_date, parse_time_str(conflict['new_time'].split(' - ')[0]).time()),
+                    'new_slot_end': datetime.combine(base_date, parse_time_str(conflict['new_time'].split(' - ')[1]).time())
+                } for conflict in proposal["conflicts"]],
+                affected_attendees=proposal["affected_attendees"],
+                impact_score=len(proposal["conflicts"]) + len(proposal["affected_attendees"]) * 0.5
+            )
+            
+            # Execute the negotiation
+            result = calendar_agent.negotiate_meeting_time(meeting_proposal)
+        elif action == "force":
+            # Create the meeting without moving conflicts
+            proposed_start = datetime.fromisoformat(proposal["start_time"])
+            proposed_end = proposed_start + timedelta(minutes=proposal["duration_minutes"])
+            
+            event = calendar_agent.calendar.create_event(
+                summary=proposal["title"],
+                start_time=proposed_start,
+                end_time=proposed_end,
+                description=proposal.get("description", ""),
+                attendees=proposal["attendees"],
+                organizer=proposal["organizer"],
+                priority=proposal["priority"]
+            )
+            
+            if event:
+                result = {
+                    "status": "success",
+                    "message": "Meeting force scheduled successfully",
+                    "event": event
+                }
+            else:
+                result = {
+                    "status": "error",
+                    "message": "Failed to force schedule meeting"
+                }
         else:
-            return result
+            return {
+                "status": "error",
+                "message": f"Invalid action: {action}"
+            }
+        
+        # Clean up the negotiation if successful
+        if result["status"] == "success":
+            del active_negotiations[proposal_id]
+        
+        return result
             
     except Exception as e:
         error_msg = f"Error processing negotiation: {str(e)}"
         logging.error(error_msg)
         logging.error(traceback.format_exc())
         return {"status": "error", "message": error_msg}
+
+@app.delete("/agents/{email}/events/{event_id}")
+async def delete_event(email: str, event_id: str):
+    """Delete a calendar event.
+    
+    Args:
+        email: Email of the agent
+        event_id: ID of the event to delete
+        
+    Returns:
+        Success/error status
+    """
+    try:
+        if email not in test_agents:
+            raise HTTPException(status_code=404, detail=f"Agent {email} not found")
+            
+        if calendar_client.delete_event(event_id):
+            logging.info(f"Successfully deleted event {event_id}")
+            return {"status": "success", "message": "Event deleted successfully"}
+        else:
+            error_msg = f"Failed to delete event {event_id}"
+            logging.error(error_msg)
+            raise HTTPException(status_code=404, detail=error_msg)
+            
+    except Exception as e:
+        error_msg = f"Error deleting event: {str(e)}"
+        logging.error(error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
 
 @app.post("/agents/{email}/evaluate_priority")
 async def evaluate_priority(email: str, event: dict):

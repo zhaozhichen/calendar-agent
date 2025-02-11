@@ -10,7 +10,7 @@ from src.api.calendar_client import CalendarClient
 from src.constants import BUSINESS_START_HOUR, BUSINESS_END_HOUR
 
 # Test users
-TEST_USERS = [
+TEST_AGENTS = [
     "alice@example.com",
     "bob@example.com",
     "charlie@example.com",
@@ -281,7 +281,7 @@ def create_test_agents(calendar_client: CalendarClient) -> List[str]:
         List of created agent emails
     """
     active_agents = []
-    for email in TEST_USERS:
+    for email in TEST_AGENTS:
         active_agents.append(email)
         print(f"✓ Created agent for {email}")
     return active_agents
@@ -293,11 +293,11 @@ def create_fixed_meetings(calendar_client: CalendarClient, active_agents: List[s
         calendar_client: The calendar client to use for creating meetings
         active_agents: List of active agent emails
     """
-    # Start from today and ensure we start at the beginning of a week (Monday)
+    # Start from today
     start_date = datetime.now()
     logging.info(f"Initial start_date: {start_date}")
-    while start_date.weekday() != 0:  # 0 = Monday
-        start_date = start_date + timedelta(days=1)
+    # while start_date.weekday() != 0:  # 0 = Monday
+    start_date = start_date + timedelta(days=1)
     
     # Create a mapping of meetings to their business days (0-9 representing the 10 business days)
     meeting_days = {
@@ -332,9 +332,9 @@ def create_fixed_meetings(calendar_client: CalendarClient, active_agents: List[s
                     second=0,
                     microsecond=0
                 )
-                logging.info(f"Before create_event - meeting_start: {meeting_start}")
+                logging.info(f"Creating meeting '{meeting['title']}'")
+                logging.info(f"Description to be set: {meeting.get('description', '')}")
                 meeting_end = meeting_start + timedelta(minutes=meeting["duration_minutes"])
-                logging.info(f"Before create_event - meeting_end: {meeting_end}")
                 
                 # Ensure organizer is in attendees list
                 all_attendees = list(set([meeting["organizer"]] + meeting["attendees"]))
@@ -344,11 +344,13 @@ def create_fixed_meetings(calendar_client: CalendarClient, active_agents: List[s
                     summary=meeting["title"],
                     start_time=meeting_start,
                     end_time=meeting_end,
-                    description=meeting["description"],
+                    description=meeting.get("description", ""),
                     attendees=all_attendees,  # Use the combined list
                     organizer=meeting["organizer"],
                     priority=meeting["priority"]
                 )
+                if event:
+                    logging.info(f"Created event with description: {event.get('description', '')}")
                 print(f"✓ Created fixed meeting: {meeting['title']} (Priority: {meeting['priority']}) ({meeting['organizer']}) on {meeting_start.strftime('%Y-%m-%d %I:%M %p')}")
 
 def create_random_meetings(calendar_client: CalendarClient, active_agents: List[str]):
@@ -385,9 +387,9 @@ def create_random_meetings(calendar_client: CalendarClient, active_agents: List[
             template = random.choice(MEETING_TEMPLATES)
             
             # Select random organizer and attendees
-            organizer = random.choice(TEST_USERS)
-            num_attendees = random.randint(1, len(TEST_USERS) - 1)
-            attendees = random.sample([u for u in TEST_USERS if u != organizer], num_attendees)
+            organizer = random.choice(TEST_AGENTS)
+            num_attendees = random.randint(1, len(TEST_AGENTS) - 1)
+            attendees = random.sample([u for u in TEST_AGENTS if u != organizer], num_attendees)
             
             # Ensure organizer is in attendees list
             all_attendees = list(set([organizer] + attendees))
@@ -411,30 +413,77 @@ def create_random_meetings(calendar_client: CalendarClient, active_agents: List[
                     )
                     logging.info(f"Created meeting: {template['title']} (Priority: {template['priority']}) ({organizer}) at {meeting_start.strftime('%Y-%m-%d %I:%M %p')}")
 
-def create_test_data(calendar_client: CalendarClient, use_fixed_meetings: bool = False) -> List[str]:
-    """Create all test data for the application.
+def create_test_data(calendar_client: CalendarClient, use_fixed_meetings: bool = True) -> List[str]:
+    """Create test data for calendar agents.
     
     Args:
-        calendar_client: The calendar client to use for creating test data
-        use_fixed_meetings: If True, use fixed meeting set; if False, generate random meetings
+        calendar_client: Calendar client instance
+        use_fixed_meetings: Whether to use fixed meetings or random ones
         
     Returns:
-        List of created agent emails
+        List of active agent emails
     """
-    print("\n=== Creating Test Agents ===")
-    active_agents = create_test_agents(calendar_client)
+    # Start from today
+    start_date = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    logging.info(f"Initial start_date: {start_date}")
     
-    print("\n=== Creating Test Meetings ===")
-    logging.info("==================================================")
-    logging.info(f"Initialization mode: {'FIXED' if use_fixed_meetings else 'RANDOM'} meetings")
-    logging.info("==================================================")
+    # Create a mapping of meetings to their business days (0-9 representing the 10 business days)
+    meeting_days = {}
     
+    # Calculate the next 10 business days (2 weeks excluding weekends)
+    business_days = []
+    current_date = start_date
+    while len(business_days) < 10:
+        if current_date.weekday() < 5:  # Monday = 0, Friday = 4
+            business_days.append(current_date)
+        current_date += timedelta(days=1)
+    
+    # Map fixed meetings to the business days
     if use_fixed_meetings:
-        logging.info("Using fixed meeting schedule")
-        create_fixed_meetings(calendar_client, active_agents)
-    else:
-        logging.info("Using random meeting generation for next 31 days")
-        logging.info("Will create 8 meetings per business day")
-        create_random_meetings(calendar_client, active_agents)
+        for i, meeting in enumerate(FIXED_MEETINGS):
+            # Distribute meetings across the 10 business days
+            day_index = i % len(business_days)
+            if day_index not in meeting_days:
+                meeting_days[day_index] = []
+            meeting_days[day_index].append(meeting)
     
-    return active_agents 
+    # Clear existing events for all test agents
+    for agent in TEST_AGENTS:
+        calendar_client.clear_events(agent)
+        
+    # Create the meetings
+    active_agents = []
+    for day_index, meetings in meeting_days.items():
+        meeting_date = business_days[day_index]
+        
+        for meeting in meetings:
+            # Create datetime for the meeting
+            meeting_start = meeting_date.replace(
+                hour=meeting['start_hour'],
+                minute=meeting['start_minute']
+            )
+            meeting_end = meeting_start + timedelta(minutes=meeting['duration_minutes'])
+            
+            # Create the event
+            event = calendar_client.create_event(
+                summary=meeting['title'],
+                start_time=meeting_start,
+                end_time=meeting_end,
+                description=meeting.get('description', ''),
+                attendees=meeting['attendees'],
+                organizer=meeting['organizer'],
+                priority=meeting['priority']
+            )
+            
+            if event:
+                logging.info(
+                    f"Created meeting '{meeting['title']}' on "
+                    f"{meeting_start.strftime('%Y-%m-%d')} at "
+                    f"{meeting_start.strftime('%I:%M %p')} - "
+                    f"{meeting_end.strftime('%I:%M %p')}"
+                )
+                
+                # Track active agents
+                active_agents.extend([meeting['organizer']] + meeting['attendees'])
+    
+    return list(set(active_agents)) 

@@ -54,6 +54,7 @@ from typing import List, Dict, Any
 from datetime import datetime, timedelta
 import uuid
 import logging
+import json
 
 from src.constants import BUSINESS_START_HOUR, BUSINESS_END_HOUR
 
@@ -86,6 +87,8 @@ class CalendarClient:
             Created event details
         """
         event_id = str(uuid.uuid4())
+        
+        logging.info(f"Creating event '{summary}' with description: {description}")
         
         event = {
             'id': event_id,
@@ -169,11 +172,10 @@ class CalendarClient:
                 continue
                 
             filtered_events.append(event)
+            logging.info(f"Found event '{event['summary']}' with description: {event.get('description', '')}")
+            logging.info(f"Full event data: {json.dumps({k: v for k, v in event.items() if k != 'attendees'}, default=str)}")
             
         logging.info(f"Found {len(filtered_events)} events for {owner_email}")
-        for event in filtered_events:
-            logging.info(f"Event: {event['summary']} at {event['start']['dateTime']}")
-            
         return filtered_events
 
     def find_free_slots(self,
@@ -303,3 +305,13 @@ class CalendarClient:
             current_time = next_business_hour(current_time)
         
         return free_slots 
+
+    def clear_events(self, owner_email: str) -> None:
+        """Clear all events for a specific user.
+        
+        Args:
+            owner_email: Email of the user whose events to clear
+        """
+        if owner_email in self._events:
+            self._events[owner_email] = []
+            logging.info(f"Cleared all events for {owner_email}") 

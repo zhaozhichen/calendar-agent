@@ -179,9 +179,59 @@ function showEventDetails(event) {
         <p><strong>Description:</strong> <span id="detailDescription">${event.extendedProps.description || 'No description'}</span></p>
     `;
     
+    // Add delete button to modal footer
+    const modalFooter = document.querySelector('#meetingDetailsModal .modal-footer');
+    if (!modalFooter) {
+        const footer = document.createElement('div');
+        footer.className = 'modal-footer';
+        document.querySelector('#meetingDetailsModal .modal-content').appendChild(footer);
+    }
+    
+    const modalFooterContent = document.querySelector('#meetingDetailsModal .modal-footer');
+    modalFooterContent.innerHTML = `
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        <button type="button" class="btn btn-danger" onclick="deleteEvent('${event.id}', '${event.title}')">Delete Event</button>
+    `;
+    
     document.getElementById('detailTitle').textContent = event.title;
     const modal = new bootstrap.Modal(document.getElementById('meetingDetailsModal'));
     modal.show();
+}
+
+// Add delete event function
+async function deleteEvent(eventId, eventTitle) {
+    if (!confirm(`Are you sure you want to delete the event "${eventTitle}"?`)) {
+        return;
+    }
+    
+    try {
+        showLoading();
+        const selectedAgent = document.getElementById('agentSelect').value;
+        if (!selectedAgent) {
+            throw new Error('No agent selected');
+        }
+        
+        const response = await fetch(`${API_BASE_URL}/agents/${selectedAgent}/events/${eventId}`, {
+            method: 'DELETE'
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to delete event');
+        }
+        
+        hideLoading();
+        showSuccess(`Successfully deleted event "${eventTitle}"`);
+        
+        // Close the modal
+        bootstrap.Modal.getInstance(document.getElementById('meetingDetailsModal')).hide();
+        
+        // Refresh the calendar
+        await onAgentSelect(selectedAgent);
+        
+    } catch (error) {
+        hideLoading();
+        showError('Failed to delete event: ' + error.message);
+    }
 }
 
 // Format date and time
@@ -325,12 +375,17 @@ negotiationDialog.innerHTML = `
                 </div>
                 <div id="negotiationDetails"></div>
                 <div class="mt-3">
-                    <p>Would you like to proceed with rescheduling these meetings?</p>
+                    <p>How would you like to proceed?</p>
+                    <div class="alert alert-warning" role="alert">
+                        <i class="bi bi-exclamation-triangle me-2"></i>
+                        Force scheduling will create the meeting without moving any conflicts. This may result in double-booking for some attendees.
+                    </div>
                 </div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary" onclick="acceptNegotiation()">Accept Rescheduling</button>
+                <button type="button" class="btn btn-warning" onclick="forceScheduleMeeting()">Force Schedule</button>
+                <button type="button" class="btn btn-primary" onclick="acceptNegotiation()">Reschedule Conflicts</button>
             </div>
         </div>
     </div>
@@ -472,6 +527,40 @@ async function acceptNegotiation() {
     currentNegotiation = null;
 }
 
+// Add the force schedule function
+async function forceScheduleMeeting() {
+    if (!currentNegotiation) return;
+    
+    try {
+        showLoading();
+        const response = await fetch(`${API_BASE_URL}/agents/${currentNegotiation.organizer}/negotiate?proposal_id=${currentNegotiation.id}&action=force`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        const result = await response.json();
+        hideLoading();
+
+        if (result.status === 'success') {
+            showSuccess(`Meeting '${currentNegotiation.title}' has been force scheduled. Some attendees may have conflicts.`);
+            bootstrap.Modal.getInstance(document.getElementById('negotiationModal')).hide();
+            // Refresh the calendar
+            const selectedAgent = document.getElementById('agentSelect').value;
+            if (selectedAgent) {
+                await onAgentSelect(selectedAgent);
+            }
+        } else {
+            showError(result.message || 'Failed to force schedule meeting');
+        }
+    } catch (error) {
+        hideLoading();
+        showError('Failed to force schedule meeting: ' + error.message);
+    }
+    currentNegotiation = null;
+}
+
 // Schedule a new meeting
 async function scheduleMeeting() {
     // Get form values
@@ -523,6 +612,17 @@ async function scheduleMeeting() {
             priority = parseInt(priorityValue);
         }
 
+        // Create date range in local timezone
+        const startDateTime = new Date(`${startDate}T00:00:00`);
+        const endDateTime = new Date(`${endDate}T23:59:59`);
+
+        // Get timezone offset in minutes
+        const tzOffset = startDateTime.getTimezoneOffset();
+
+        // Adjust for timezone offset to ensure correct date
+        startDateTime.setMinutes(startDateTime.getMinutes() - tzOffset);
+        endDateTime.setMinutes(endDateTime.getMinutes() - tzOffset);
+
         // Schedule the meeting with the determined priority
         const response = await fetch(`${API_BASE_URL}/agents/${organizer}/meetings`, {
             method: 'POST',
@@ -537,7 +637,7 @@ async function scheduleMeeting() {
                 priority,
                 description,
                 preferred_time_ranges: [
-                    [new Date(startDate).toISOString(), new Date(endDate).toISOString()]
+                    [startDateTime.toISOString(), endDateTime.toISOString()]
                 ]
             })
         });
