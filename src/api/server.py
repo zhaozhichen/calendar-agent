@@ -402,6 +402,8 @@ def _format_conflicts_info(conflicts: List[Dict[str, Any]], all_attendees: List[
             "new_slot_start": new_slot_start,
             "new_slot_end": new_slot_end
         }
+        
+        # Add each conflict to the list without deduplication
         conflicts_info.append(conflict_info)
         
         # Add conflict to each affected attendee's list
@@ -556,13 +558,45 @@ async def request_meeting(email: str, request: MeetingRequest):
             feasible_proposals = []
             logging.info("\n=== No Perfect Slots Available - Analyzing Slots with Conflicts ===")
             
-            for p in proposals:
-                # Check if all conflicts can be moved (have lower or equal priority)
-                all_movable = True
+            for idx, p in enumerate(proposals):
+                logging.info(f"\nAnalyzing Proposal {idx + 1}:")
+                logging.info(f"Proposed Time: {p.proposed_start_time.strftime('%Y-%m-%d %I:%M %p')}")
+                logging.info(f"Impact Score: {p.impact_score}")
+                
+                # Create a map to deduplicate conflicts by ID
+                unique_conflicts = {}
                 for conflict in p.conflicts:
+                    if conflict['id'] not in unique_conflicts:
+                        unique_conflicts[conflict['id']] = {
+                            **conflict,
+                            'attendees': set(conflict['attendees'])
+                        }
+                    else:
+                        # Merge attendees for duplicate conflicts
+                        unique_conflicts[conflict['id']]['attendees'].update(conflict['attendees'])
+                
+                logging.info(f"Number of Unique Conflicts: {len(unique_conflicts)}")
+                
+                # Initialize all_movable flag
+                all_movable = True
+                
+                # Log unique conflicts
+                logging.info("\nConflict Analysis:")
+                for conflict_idx, (conflict_id, conflict) in enumerate(unique_conflicts.items(), 1):
+                    logging.info(f"\nConflict {conflict_idx}:")
+                    logging.info(f"- ID: {conflict_id}")
+                    logging.info(f"- Title: {conflict['title']}")
+                    logging.info(f"- Current Time: {conflict['start'].strftime('%I:%M %p')} - {conflict['end'].strftime('%I:%M %p')}")
+                    logging.info(f"- New Time: {conflict['new_slot_start'].strftime('%I:%M %p')} - {conflict['new_slot_end'].strftime('%I:%M %p')}")
+                    logging.info(f"- Priority: {conflict.get('priority', 'N/A')} (Requested Meeting Priority: {request.priority})")
+                    logging.info(f"- Attendees: {', '.join(sorted(conflict['attendees']))}")
+                    
                     if conflict.get('priority', 0) > request.priority:
+                        logging.info("  ⚠️ Cannot move - Higher priority than requested meeting")
                         all_movable = False
                         break
+                    else:
+                        logging.info("  ✓ Can be moved - Lower or equal priority")
                 
                 if all_movable:
                     # Format conflicts information for this proposal
@@ -580,7 +614,8 @@ async def request_meeting(email: str, request: MeetingRequest):
                         "affected_attendees": p.affected_attendees,
                         "priority": request.priority,
                         "description": request.description,
-                        "impact_score": p.impact_score
+                        "impact_score": p.impact_score,
+                        "unique_conflicts_count": len(unique_conflicts)  # Store the count
                     }
                     feasible_proposals.append(proposal)
                     
@@ -599,13 +634,17 @@ async def request_meeting(email: str, request: MeetingRequest):
             best_proposal = feasible_proposals[0]
             negotiation_msg = _format_negotiation_message(best_proposal, attendee_conflicts)
             
-            logging.info("\nNegotiation message prepared for user.")
+            logging.info("\n=== Initial Negotiation Proposal ===")
+            logging.info(f"Best proposal start time: {best_proposal['start_time']}")
+            logging.info(f"Number of unique conflicts: {best_proposal['unique_conflicts_count']}")  # Use stored count
+            logging.info(f"Impact score: {best_proposal['impact_score']}")
             
             return {
                 "status": "needs_negotiation",
                 "message": negotiation_msg,
                 "proposal": best_proposal,
-                "proposals": feasible_proposals  # Return all feasible proposals
+                "proposals": feasible_proposals,  # Return all feasible proposals
+                "total_proposals": len(feasible_proposals)  # Add total count
             }
 
     except Exception as e:

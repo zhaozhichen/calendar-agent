@@ -92,22 +92,81 @@ async function loadAgents() {
         
         const agentSelect = document.getElementById('agentSelect');
         const organizerSelect = document.getElementById('meetingOrganizer');
-        const attendeesSelect = document.getElementById('meetingAttendees');
+        const attendeesContainer = document.getElementById('meetingAttendees');
         
-        // Clear existing options except the first one
-        [agentSelect, organizerSelect, attendeesSelect].forEach(select => {
+        // Clear existing options except the first one for dropdowns
+        [agentSelect, organizerSelect].forEach(select => {
             while (select.options.length > 1) {
                 select.remove(1);
             }
         });
         
-        // Add agents to dropdowns
-        data.agents.forEach(email => {
-            [agentSelect, organizerSelect, attendeesSelect].forEach(select => {
+        // Clear attendees container
+        attendeesContainer.innerHTML = '';
+        
+        // Sort agents alphabetically
+        const sortedAgents = [...data.agents].sort((a, b) => a.localeCompare(b));
+        
+        // Add sorted agents to dropdowns
+        sortedAgents.forEach(email => {
+            [agentSelect, organizerSelect].forEach(select => {
                 const option = new Option(email, email);
                 select.add(option);
             });
         });
+
+        // Create select all checkbox
+        const selectAllDiv = document.createElement('div');
+        selectAllDiv.className = 'form-check mb-2';
+        selectAllDiv.innerHTML = `
+            <input class="form-check-input" type="checkbox" id="selectAllAttendees">
+            <label class="form-check-label" for="selectAllAttendees">
+                Select All
+            </label>
+        `;
+        attendeesContainer.appendChild(selectAllDiv);
+
+        // Add individual attendee checkboxes
+        sortedAgents.forEach(email => {
+            const div = document.createElement('div');
+            div.className = 'form-check';
+            div.innerHTML = `
+                <input class="form-check-input attendee-checkbox" type="checkbox" value="${email}" id="attendee-${email}">
+                <label class="form-check-label" for="attendee-${email}">
+                    ${email}
+                </label>
+            `;
+            attendeesContainer.appendChild(div);
+        });
+
+        // Add event listeners
+        const selectAllCheckbox = document.getElementById('selectAllAttendees');
+        const attendeeCheckboxes = document.querySelectorAll('.attendee-checkbox');
+
+        selectAllCheckbox.addEventListener('change', function() {
+            attendeeCheckboxes.forEach(checkbox => {
+                checkbox.checked = this.checked;
+            });
+        });
+
+        attendeeCheckboxes.forEach(checkbox => {
+            checkbox.addEventListener('change', function() {
+                selectAllCheckbox.checked = 
+                    Array.from(attendeeCheckboxes).every(cb => cb.checked);
+            });
+        });
+
+        // Add event listener for organizer selection to auto-check their checkbox
+        organizerSelect.addEventListener('change', function() {
+            const selectedOrganizer = this.value;
+            if (selectedOrganizer) {
+                const organizerCheckbox = document.getElementById(`attendee-${selectedOrganizer}`);
+                if (organizerCheckbox) {
+                    organizerCheckbox.checked = true;
+                }
+            }
+        });
+
     } catch (error) {
         showError('Failed to load agents: ' + error.message);
     }
@@ -329,15 +388,27 @@ async function createUser() {
         if (result.status === 'success') {
             showSuccess(result.message);
             
-            // Add the new user to all dropdowns
+            // Add the new user to select dropdowns
             const agentSelect = document.getElementById('agentSelect');
             const organizerSelect = document.getElementById('meetingOrganizer');
-            const attendeesSelect = document.getElementById('meetingAttendees');
             
-            [agentSelect, organizerSelect, attendeesSelect].forEach(select => {
+            // Add to select elements
+            [agentSelect, organizerSelect].forEach(select => {
                 const option = new Option(email, email);
                 select.add(option);
             });
+            
+            // Add checkbox to attendees container
+            const attendeesContainer = document.getElementById('meetingAttendees');
+            const div = document.createElement('div');
+            div.className = 'form-check';
+            div.innerHTML = `
+                <input class="form-check-input attendee-checkbox" type="checkbox" value="${email}" id="attendee-${email}">
+                <label class="form-check-label" for="attendee-${email}">
+                    ${email}
+                </label>
+            `;
+            attendeesContainer.appendChild(div);
             
             // Close the modal
             bootstrap.Modal.getInstance(document.getElementById('createUserModal')).hide();
@@ -373,18 +444,28 @@ negotiationDialog.innerHTML = `
                     <div id="targetMeetingAttendees" class="mb-2"></div>
                     <div id="targetMeetingPriority" class="mb-2"></div>
                 </div>
-                <div class="d-flex align-items-center justify-content-between mb-3">
-                    <button type="button" class="btn btn-outline-secondary" id="prevConflict" disabled>
-                        <i class="bi bi-chevron-left"></i>
-                    </button>
-                    <h6 class="text-primary mb-0">Conflict <span id="currentConflictIndex">1</span> of <span id="totalConflicts">1</span></h6>
-                    <button type="button" class="btn btn-outline-secondary" id="nextConflict" disabled>
-                        <i class="bi bi-chevron-right"></i>
-                    </button>
+                <div class="d-flex align-items-center justify-content-center mb-3">
+                    <h6 class="text-primary mb-0">
+                        <button type="button" class="btn btn-link btn-sm text-decoration-none p-0 me-2" id="prevConflict" disabled>
+                            ←
+                        </button>
+                        Alternative Proposal <span id="currentConflictIndex">1</span> of <span id="totalConflicts">1</span>
+                        <button type="button" class="btn btn-link btn-sm text-decoration-none p-0 ms-2" id="nextConflict" disabled>
+                            →
+                        </button>
+                    </h6>
+                </div>
+                <div id="proposalStats" class="text-center mb-3">
+                    <span class="badge bg-info me-2">Impact Score: <span id="proposalImpactScore">0</span></span>
+                    <span class="badge bg-warning">Conflicts to Resolve: <span id="proposalConflictCount">0</span></span>
                 </div>
                 <div id="negotiationDetails"></div>
                 <div class="mt-3">
                     <p>How would you like to proceed?</p>
+                    <div class="alert alert-info" role="alert">
+                        <i class="bi bi-info-circle me-2"></i>
+                        This proposal will reschedule all conflicts shown above. Use the navigation buttons to view alternative proposals with different impact scores.
+                    </div>
                     <div class="alert alert-warning" role="alert">
                         <i class="bi bi-exclamation-triangle me-2"></i>
                         Force scheduling will create the meeting without moving any conflicts. This may result in double-booking for some attendees.
@@ -394,7 +475,7 @@ negotiationDialog.innerHTML = `
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                 <button type="button" class="btn btn-warning" onclick="forceScheduleMeeting()">Force Schedule</button>
-                <button type="button" class="btn btn-primary" onclick="acceptNegotiation()">Reschedule Conflicts</button>
+                <button type="button" class="btn btn-primary" onclick="acceptNegotiation()">Accept This Proposal</button>
             </div>
         </div>
     </div>
@@ -408,18 +489,19 @@ let allProposals = [];
 
 // Function to format conflicts for display
 function formatConflicts(conflicts) {
-    // Create a Map to deduplicate conflicts
+    // Create a Map to deduplicate conflicts using meeting ID as key
     const uniqueConflictsMap = new Map();
     
-    // First pass: group conflicts by title and time
+    // First pass: group conflicts by meeting ID
     conflicts.forEach(conflict => {
-        const key = `${conflict.title}-${conflict.time}`;
-        if (!uniqueConflictsMap.has(key)) {
-            uniqueConflictsMap.set(key, {
-                ...conflict
+        if (!uniqueConflictsMap.has(conflict.id)) {
+            uniqueConflictsMap.set(conflict.id, {
+                ...conflict,
+                attendees: [...new Set(conflict.attendees)]  // Ensure unique attendees
             });
         } else {
-            const existing = uniqueConflictsMap.get(key);
+            // If we see this meeting ID again, merge the attendees
+            const existing = uniqueConflictsMap.get(conflict.id);
             existing.attendees = [...new Set([...existing.attendees, ...conflict.attendees])];
         }
     });
@@ -443,56 +525,140 @@ function formatConflicts(conflicts) {
 function updateNavigationButtons() {
     const prevButton = document.getElementById('prevConflict');
     const nextButton = document.getElementById('nextConflict');
-    const currentIndexSpan = document.getElementById('currentConflictIndex');
-    const totalConflictsSpan = document.getElementById('totalConflicts');
+    const hasMultipleProposals = allProposals && allProposals.length > 1;
     
+    // Update button states
     prevButton.disabled = currentConflictIndex === 0;
-    nextButton.disabled = currentConflictIndex >= allProposals.length - 1;
+    nextButton.disabled = currentConflictIndex === allProposals.length - 1;
     
-    currentIndexSpan.textContent = currentConflictIndex + 1;
-    totalConflictsSpan.textContent = allProposals.length;
+    // Update visibility
+    prevButton.style.display = hasMultipleProposals ? 'inline-block' : 'none';
+    nextButton.style.display = hasMultipleProposals ? 'inline-block' : 'none';
+    
+    console.log('Navigation button states:', {
+        hasMultipleProposals,
+        currentIndex: currentConflictIndex,
+        totalProposals: allProposals.length,
+        buttonStates: {
+            prev: { disabled: prevButton.disabled, display: prevButton.style.display },
+            next: { disabled: nextButton.disabled, display: nextButton.style.display }
+        }
+    });
 }
 
 // Function to show negotiation dialog
 function showNegotiationDialog(proposal) {
-    currentNegotiation = proposal;
-    currentConflictIndex = 0;
-    allProposals = [proposal]; // Initialize with the first proposal
+    console.log('\n=== Negotiation Dialog Started ===');
     
-    // Fetch all available proposals
-    fetch(`${API_BASE_URL}/agents/${proposal.organizer}/meetings`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            title: proposal.title,
-            duration_minutes: proposal.duration_minutes,
-            organizer: proposal.organizer,
-            attendees: proposal.attendees,
-            priority: proposal.priority,
-            description: proposal.description,
-            preferred_time_ranges: [
-                [proposal.start_time, new Date(new Date(proposal.start_time).getTime() + proposal.duration_minutes * 60000).toISOString()]
-            ]
-        })
-    })
-    .then(response => response.json())
-    .then(result => {
-        if (result.proposals) {
-            allProposals = result.proposals;
-            updateNavigationButtons();
+    // Deduplicate conflicts in the proposal before logging
+    if (proposal.conflicts) {
+        const uniqueConflictsMap = new Map();
+        proposal.conflicts.forEach(conflict => {
+            if (!uniqueConflictsMap.has(conflict.id)) {
+                uniqueConflictsMap.set(conflict.id, {
+                    ...conflict,
+                    attendees: [...new Set(conflict.attendees)]
+                });
+            } else {
+                // Merge attendees for duplicate conflicts
+                const existing = uniqueConflictsMap.get(conflict.id);
+                existing.attendees = [...new Set([...existing.attendees, ...conflict.attendees])];
+            }
+        });
+        proposal.conflicts = Array.from(uniqueConflictsMap.values());
+    }
+    
+    console.log('Raw proposal data:', JSON.stringify(proposal, null, 2));
+    
+    // Reset state
+    currentConflictIndex = 0;
+    
+    // Initialize proposals array
+    if (proposal.proposals && Array.isArray(proposal.proposals)) {
+        // Deduplicate conflicts in each proposal
+        proposal.proposals = proposal.proposals.map(p => {
+            if (p.conflicts) {
+                const uniqueConflictsMap = new Map();
+                p.conflicts.forEach(conflict => {
+                    if (!uniqueConflictsMap.has(conflict.id)) {
+                        uniqueConflictsMap.set(conflict.id, {
+                            ...conflict,
+                            attendees: [...new Set(conflict.attendees)]
+                        });
+                    } else {
+                        const existing = uniqueConflictsMap.get(conflict.id);
+                        existing.attendees = [...new Set([...existing.attendees, ...conflict.attendees])];
+                    }
+                });
+                return {
+                    ...p,
+                    conflicts: Array.from(uniqueConflictsMap.values())
+                };
+            }
+            return p;
+        });
+        
+        console.log('Found proposals array with length:', proposal.proposals.length);
+        allProposals = proposal.proposals;
+    } else if (proposal.proposal && proposal.total_proposals > 1) {
+        console.log('Creating proposals array from single proposal');
+        allProposals = [proposal.proposal];
+    } else {
+        console.log('No proposals array found, using single proposal');
+        allProposals = [proposal];
+    }
+    
+    // Set initial proposal
+    currentNegotiation = allProposals[0];
+    
+    console.log('Initialized proposals:', {
+        totalProposals: allProposals.length,
+        currentIndex: currentConflictIndex,
+        currentNegotiation: {
+            title: currentNegotiation.title,
+            start_time: currentNegotiation.start_time,
+            impact_score: currentNegotiation.impact_score,
+            conflicts: currentNegotiation.conflicts?.length
         }
-    })
-    .catch(error => {
-        console.error('Error fetching proposals:', error);
     });
     
-    const proposedDateTime = new Date(proposal.start_time);
-    const endDateTime = new Date(proposedDateTime.getTime() + proposal.duration_minutes * 60000);
+    // Update the display with the first proposal
+    updateNegotiationDisplay();
+    
+    // Set up navigation button handlers
+    document.getElementById('prevConflict').onclick = () => {
+        if (currentConflictIndex > 0) {
+            currentConflictIndex--;
+            currentNegotiation = allProposals[currentConflictIndex];
+            updateNegotiationDisplay();
+        }
+    };
+    
+    document.getElementById('nextConflict').onclick = () => {
+        if (currentConflictIndex < allProposals.length - 1) {
+            currentConflictIndex++;
+            currentNegotiation = allProposals[currentConflictIndex];
+            updateNegotiationDisplay();
+        }
+    };
+    
+    updateNavigationButtons();
+    
+    const modal = new bootstrap.Modal(document.getElementById('negotiationModal'));
+    modal.show();
+}
+
+// Function to update the negotiation display
+function updateNegotiationDisplay() {
+    const proposedDateTime = new Date(currentNegotiation.start_time);
+    const endDateTime = new Date(proposedDateTime.getTime() + currentNegotiation.duration_minutes * 60000);
+    
+    // Update proposal count display
+    document.getElementById('currentConflictIndex').textContent = (currentConflictIndex + 1).toString();
+    document.getElementById('totalConflicts').textContent = allProposals.length.toString();
     
     // Update target meeting details
-    document.getElementById('targetMeetingTitle').innerHTML = `Meeting: ${proposal.title}`;
+    document.getElementById('targetMeetingTitle').innerHTML = `Meeting: ${currentNegotiation.title}`;
     document.getElementById('targetMeetingTime').innerHTML = `
         <strong>Found a potential slot at:</strong><br>
         <div class="ms-2">
@@ -512,42 +678,35 @@ function showNegotiationDialog(proposal) {
             })}
         </div>
     `;
-    document.getElementById('targetMeetingOrganizer').innerHTML = `Organizer: ${proposal.organizer}`;
-    document.getElementById('targetMeetingAttendees').innerHTML = `Attendees: ${proposal.attendees.join(', ')}`;
-    document.getElementById('targetMeetingPriority').innerHTML = `Priority: <span class="badge bg-secondary">${proposal.priority}</span>`;
+    document.getElementById('targetMeetingOrganizer').innerHTML = `Organizer: ${currentNegotiation.organizer}`;
+    document.getElementById('targetMeetingAttendees').innerHTML = `Attendees: ${currentNegotiation.attendees.join(', ')}`;
+    document.getElementById('targetMeetingPriority').innerHTML = `Priority: <span class="badge bg-secondary">${currentNegotiation.priority}</span>`;
+    
+    // Update proposal statistics
+    document.getElementById('proposalImpactScore').textContent = currentNegotiation.impact_score.toFixed(1);
+    document.getElementById('proposalConflictCount').textContent = currentNegotiation.conflicts.length;
     
     // Update conflicts details
     const details = document.getElementById('negotiationDetails');
-    details.innerHTML = `
-        <h6 class="text-primary mb-3">Conflicts to be Rescheduled:</h6>
-        ${formatConflicts(proposal.conflicts)}
-        <div class="affected-attendees mt-3">
-            <h6 class="text-primary">Affected Attendees:</h6>
-            <p>${proposal.affected_attendees.join(', ')}</p>
-        </div>
-    `;
-    
-    // Set up navigation button handlers
-    document.getElementById('prevConflict').onclick = () => {
-        if (currentConflictIndex > 0) {
-            currentConflictIndex--;
-            currentNegotiation = allProposals[currentConflictIndex];
-            showNegotiationDialog(currentNegotiation);
-        }
-    };
-    
-    document.getElementById('nextConflict').onclick = () => {
-        if (currentConflictIndex < allProposals.length - 1) {
-            currentConflictIndex++;
-            currentNegotiation = allProposals[currentConflictIndex];
-            showNegotiationDialog(currentNegotiation);
-        }
-    };
+    if (currentNegotiation.conflicts.length > 0) {
+        details.innerHTML = `
+            <h6 class="text-primary mb-3">All Conflicts in This Proposal:</h6>
+            ${formatConflicts(currentNegotiation.conflicts)}
+            <div class="affected-attendees mt-3">
+                <h6 class="text-primary">Total Affected Attendees:</h6>
+                <p>${currentNegotiation.affected_attendees.join(', ')}</p>
+            </div>
+        `;
+    } else {
+        details.innerHTML = `
+            <div class="alert alert-success" role="alert">
+                <i class="bi bi-check-circle me-2"></i>
+                This proposal has no conflicts! All attendees are available at the proposed time.
+            </div>
+        `;
+    }
     
     updateNavigationButtons();
-    
-    const modal = new bootstrap.Modal(document.getElementById('negotiationModal'));
-    modal.show();
 }
 
 // Function to handle negotiation acceptance
@@ -569,9 +728,7 @@ async function acceptNegotiation() {
         if (result.status === 'success') {
             let message = `Meeting '${currentNegotiation.title}' (Priority: ${currentNegotiation.priority || 'N/A'}) has been successfully scheduled.\n\n`;
             
-            // Add rescheduling details with deduplication by meeting ID
             if (result.rescheduled_meetings && result.rescheduled_meetings.length > 0) {
-                // Create a Map to deduplicate meetings based on meeting ID
                 const uniqueMeetingsMap = new Map();
                 result.rescheduled_meetings.forEach(meeting => {
                     uniqueMeetingsMap.set(meeting.id, meeting);
@@ -587,8 +744,7 @@ async function acceptNegotiation() {
             }
             
             showSuccess(message.replace(/\n/g, '<br>'));
-            bootstrap.Modal.getInstance(document.getElementById('negotiationModal')).hide();
-            // Refresh the calendar
+            
             const selectedAgent = document.getElementById('agentSelect').value;
             if (selectedAgent) {
                 await onAgentSelect(selectedAgent);
@@ -599,8 +755,13 @@ async function acceptNegotiation() {
     } catch (error) {
         hideLoading();
         showError('Failed to process negotiation: ' + error.message);
+    } finally {
+        currentNegotiation = null;
+        const modal = bootstrap.Modal.getInstance(document.getElementById('negotiationModal'));
+        if (modal) {
+            modal.hide();
+        }
     }
-    currentNegotiation = null;
 }
 
 // Add the force schedule function
@@ -621,8 +782,7 @@ async function forceScheduleMeeting() {
 
         if (result.status === 'success') {
             showSuccess(`Meeting '${currentNegotiation.title}' has been force scheduled. Some attendees may have conflicts.`);
-            bootstrap.Modal.getInstance(document.getElementById('negotiationModal')).hide();
-            // Refresh the calendar
+            
             const selectedAgent = document.getElementById('agentSelect').value;
             if (selectedAgent) {
                 await onAgentSelect(selectedAgent);
@@ -633,8 +793,13 @@ async function forceScheduleMeeting() {
     } catch (error) {
         hideLoading();
         showError('Failed to force schedule meeting: ' + error.message);
+    } finally {
+        currentNegotiation = null;
+        const modal = bootstrap.Modal.getInstance(document.getElementById('negotiationModal'));
+        if (modal) {
+            modal.hide();
+        }
     }
-    currentNegotiation = null;
 }
 
 // Schedule a new meeting
@@ -642,7 +807,7 @@ async function scheduleMeeting() {
     // Get form values
     const title = document.getElementById('meetingTitle').value;
     const organizer = document.getElementById('meetingOrganizer').value;
-    const attendees = Array.from(document.getElementById('meetingAttendees').selectedOptions).map(option => option.value);
+    const attendees = Array.from(document.querySelectorAll('.attendee-checkbox:checked')).map(cb => cb.value);
     const startDate = document.getElementById('meetingStartDate').value;
     const endDate = document.getElementById('meetingEndDate').value;
     const duration = document.getElementById('meetingDuration').value;
@@ -695,9 +860,9 @@ async function scheduleMeeting() {
         // Get timezone offset in minutes
         const tzOffset = startDateTime.getTimezoneOffset();
 
-        // Adjust for timezone offset to ensure correct date
-        startDateTime.setMinutes(startDateTime.getMinutes() - tzOffset);
-        endDateTime.setMinutes(endDateTime.getMinutes() - tzOffset);
+        // Create new dates without modifying for timezone
+        const isoStartDate = new Date(startDateTime.getFullYear(), startDateTime.getMonth(), startDateTime.getDate(), 0, 0, 0).toISOString();
+        const isoEndDate = new Date(endDateTime.getFullYear(), endDateTime.getMonth(), endDateTime.getDate(), 23, 59, 59).toISOString();
 
         // Schedule the meeting with the determined priority
         const response = await fetch(`${API_BASE_URL}/agents/${organizer}/meetings`, {
@@ -713,7 +878,7 @@ async function scheduleMeeting() {
                 priority,
                 description,
                 preferred_time_ranges: [
-                    [startDateTime.toISOString(), endDateTime.toISOString()]
+                    [isoStartDate, isoEndDate]
                 ]
             })
         });
@@ -758,8 +923,12 @@ async function scheduleMeeting() {
         } else if (result.status === 'needs_negotiation') {
             // Close the scheduling modal
             bootstrap.Modal.getInstance(document.getElementById('scheduleMeetingModal')).hide();
-            // Show negotiation dialog
-            showNegotiationDialog(result.proposal);
+            
+            // Log the negotiation response
+            console.log('Negotiation response:', result);
+            
+            // Show negotiation dialog with the complete result object
+            showNegotiationDialog(result);
         } else {
             showError(result.message || 'Failed to schedule meeting');
         }

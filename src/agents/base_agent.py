@@ -193,21 +193,31 @@ class CalendarAgent:
                 event_start = temp_start.astimezone() if temp_start.tzinfo is not None else temp_start.astimezone()
                 event_end = temp_end.astimezone() if temp_end.tzinfo is not None else temp_end.astimezone()
                 
+                # Add detailed logging for overlap detection
+                logging.info(f"\nChecking event for overlap: {event.get('summary', 'Untitled')}")
+                logging.info(f"Event time: {event_start.strftime('%I:%M %p')} - {event_end.strftime('%I:%M %p')}")
+                logging.info(f"Proposed time: {current_time.strftime('%I:%M %p')} - {proposed_end.strftime('%I:%M %p')}")
+                logging.info(f"Event attendees: {[a.get('email') for a in event.get('attendees', [])]}")
+                
                 # Check for overlap
                 if (event_start < proposed_end and event_end > current_time):
+                    logging.info(f"Overlap detected with: {event.get('summary', 'Untitled')}")
                     event_priority = self.evaluate_meeting_priority(event)
+                    logging.info(f"Event priority: {event_priority} (Requested priority: {request.priority})")
                     
                     # Skip if we can't move this event due to higher priority
                     if event_priority >= request.priority:
                         # This slot won't work due to unmovable conflict
+                        logging.info(f"Cannot move event due to higher priority: {event.get('summary', 'Untitled')}")
                         conflicts = None
                         break
                         
                     # Log full event data before creating conflict
-                    logging.info(f"Creating conflict from event: {json.dumps({k: v for k, v in event.items()}, default=str)}")
+                    logging.info(f"Creating conflict from event: {json.dumps({k: v for k, v in event.items() if k != 'attendees'}, default=str)}")
+                    logging.info(f"Event attendees: {[a.get('email') for a in event.get('attendees', [])]}")
                     
                     # Add conflict information
-                    conflicts.append({
+                    conflict = {
                         'id': event['id'],
                         'title': event['summary'],
                         'start': event_start,
@@ -217,9 +227,12 @@ class CalendarAgent:
                         'description': event.get('description', ''),
                         'new_slot_start': None,  # Will be set if we find an alternative slot
                         'new_slot_end': None
-                    })
+                    }
+                    conflicts.append(conflict)
                     logging.info(f"Found conflict: {event['summary']}")
+                    logging.info(f"Total conflicts so far: {len(conflicts)}")
                     affected_attendees.update(a['email'] for a in event.get('attendees', []))
+                    logging.info(f"Total affected attendees so far: {len(affected_attendees)}")
             
             # Skip this slot if we found an unmovable conflict
             if conflicts is None:
@@ -232,6 +245,10 @@ class CalendarAgent:
                 proposed_end = current_time + timedelta(minutes=request.duration_minutes)
                 
                 for conflict in conflicts:
+                    logging.info(f"\nFinding alternative slot for conflict: {conflict['title']}")
+                    logging.info(f"Current time: {conflict['start'].strftime('%I:%M %p')} - {conflict['end'].strftime('%I:%M %p')}")
+                    logging.info(f"Attendees: {', '.join(conflict['attendees'])}")
+                    
                     alternative_slot = self._find_alternative_slot(
                         conflict['start'],
                         conflict['end'],
@@ -247,16 +264,33 @@ class CalendarAgent:
                                    f"{conflict['new_slot_start'].strftime('%I:%M %p')} - "
                                    f"{conflict['new_slot_end'].strftime('%I:%M %p')}")
                     else:
+                        logging.info(f"Could not find alternative slot for '{conflict['title']}'")
                         all_conflicts_resolvable = False
-                        break
                 
+                # Only add the proposal if all conflicts are resolvable
                 if all_conflicts_resolvable:
+                    # Create a map to deduplicate conflicts by ID
+                    unique_conflicts = {}
+                    for conflict in conflicts:
+                        if conflict['id'] not in unique_conflicts:
+                            unique_conflicts[conflict['id']] = {
+                                **conflict,
+                                'attendees': set(conflict['attendees'])
+                            }
+                        else:
+                            # Merge attendees for duplicate conflicts
+                            unique_conflicts[conflict['id']]['attendees'].update(conflict['attendees'])
+                    
+                    # Calculate impact score based on deduplicated conflicts
+                    impact_score = len(unique_conflicts) + len(affected_attendees) * 0.5
+                    logging.info(f"Creating proposal with impact score {impact_score} ({len(unique_conflicts)} unique conflicts, {len(affected_attendees)} affected attendees)")
+                    
                     proposals.append(MeetingProposal(
                         request=request,
                         proposed_start_time=current_time,
-                        conflicts=conflicts,
+                        conflicts=conflicts.copy(),  # Keep the original conflicts list for rescheduling
                         affected_attendees=list(affected_attendees),
-                        impact_score=len(conflicts) + len(affected_attendees) * 0.5
+                        impact_score=impact_score
                     ))
             else:
                 # Perfect slot found with no conflicts
@@ -545,7 +579,9 @@ class CalendarAgent:
             if any(attendee in event_attendees for attendee in attendees):
                 busy_periods.append({
                     'start': event_start,
-                    'end': event_end
+                    'end': event_end,
+                    'title': event.get('summary', 'Untitled'),
+                    'attendees': event_attendees
                 })
         
         # Sort busy periods

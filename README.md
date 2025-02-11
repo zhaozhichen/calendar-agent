@@ -10,6 +10,11 @@ Test server available at: https://calendar-agent.onrender.com
 - Priority-based Decision Making: Evaluation of meeting priorities for optimal scheduling decisions
 - Mock Calendar: Built-in mock calendar for testing and demonstration purposes
 - Web Interface: Modern web interface for managing meetings and viewing schedules
+- Multiple Scheduling Proposals: System generates multiple alternative proposals with different impact scores
+- Force Scheduling Option: Ability to force-schedule meetings without moving conflicts
+- User Management: Create and manage calendar users through the interface
+- Deduplication: Smart handling of duplicate conflicts and attendees
+- Real-time Updates: Calendar view updates automatically when changes are made
 
 ## Setup
 
@@ -50,9 +55,9 @@ The server will start at http://localhost:8000
 
 The system initializes with either:
 - Random meetings: 8 meetings per business day for the next month
-- Fixed test meetings: A predefined set of meetings for testing
+- Fixed test meetings: A predefined set of meetings for testing (recommended for consistent testing)
 
-To switch between modes, modify the `use_fixed_meetings` parameter in `src/run_server.py`.
+To switch between modes, modify the `use_fixed_meetings` parameter in `src/run_server.py`. The default is set to use fixed meetings for more predictable testing.
 
 ### Business Hours
 
