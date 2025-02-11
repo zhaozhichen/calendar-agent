@@ -2,7 +2,7 @@
 Calendar API client implementation.
 
 This module provides a high-level interface for calendar operations with built-in
-timezone handling and business hours logic.
+business hours logic.
 
 Key Classes:
     - CalendarClient: Main client class with methods:
@@ -52,20 +52,10 @@ Features:
 """
 from typing import List, Dict, Any
 from datetime import datetime, timedelta
-from pytz import timezone
 import uuid
-import pytz
-import functools
-import inspect
-import os
-import sys
 import logging
 
-# Add the project root directory to Python path
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-sys.path.append(project_root)
-
-from src.constants import EST, BUSINESS_START_HOUR, BUSINESS_END_HOUR
+from src.constants import BUSINESS_START_HOUR, BUSINESS_END_HOUR
 
 class CalendarClient:
     def __init__(self):
@@ -84,25 +74,19 @@ class CalendarClient:
         """Create a new calendar event.
         
         Args:
-            summary: Event title/summary
-            start_time: Event start time
-            end_time: Event end time
+            summary: Event title
+            start_time: Start time in local time
+            end_time: End time in local time
             description: Optional event description
             attendees: Optional list of attendee emails
             organizer: Optional organizer email
-            priority: Optional priority level (1-5)
+            priority: Optional priority level for the event
             
         Returns:
             Created event details
         """
         event_id = str(uuid.uuid4())
         
-        # Ensure times are in EST timezone
-        if start_time.tzinfo != EST:
-            start_time = start_time.astimezone(EST)
-        if end_time.tzinfo != EST:
-            end_time = end_time.astimezone(EST)
-            
         event = {
             'id': event_id,
             'summary': summary,
@@ -111,7 +95,7 @@ class CalendarClient:
             'description': description,
             'attendees': [{'email': email} for email in (attendees or [])],
             'organizer': {'email': organizer} if organizer else None,
-            'priority': priority  # Store priority in the event
+            'priority': priority
         }
         
         # Store event for each attendee and organizer
@@ -123,21 +107,13 @@ class CalendarClient:
             if participant not in self._events:
                 self._events[participant] = []
             self._events[participant].append(event)
-            logging.info(f"Created event '{summary}' for {participant} at {start_time.strftime('%I:%M %p')} - {end_time.strftime('%I:%M %p')} EST")
+            logging.info(f"Created event '{summary}' for {participant} at {start_time.strftime('%I:%M %p')} - {end_time.strftime('%I:%M %p')}")
         
         return event
     
     def delete_event(self, event_id: str) -> bool:
-        """Delete a calendar event.
-        
-        Args:
-            event_id: ID of the event to delete
-            
-        Returns:
-            True if event was deleted, False if not found
-        """
+        """Delete a calendar event."""
         deleted = False
-        # Remove event from all participants' calendars
         for participant_events in self._events.values():
             for i, event in enumerate(participant_events):
                 if event['id'] == event_id:
@@ -148,23 +124,21 @@ class CalendarClient:
         return deleted
     
     def get_events(self,
-                  start_date: datetime = None,
-                  end_date: datetime = None,
-                  calendar_id: str = 'primary',
+                  start_time: datetime,
+                  end_time: datetime,
                   owner_email: str = None) -> List[Dict[str, Any]]:
-        """Get calendar events within the specified date range.
+        """Get events in a time range.
         
         Args:
-            start_date: Start of the search range
-            end_date: End of the search range
-            calendar_id: ID of the calendar to search in
-            owner_email: Email of the calendar owner
+            start_time: Start time in local time
+            end_time: End time in local time
+            owner_email: Optional owner email to filter events
             
         Returns:
-            List of events
+            List of events in the time range
         """
         logging.info(f"Getting events for {owner_email}")
-        logging.info(f"Date range: {start_date} to {end_date}")
+        logging.info(f"Date range: {start_time} to {end_time}")
         
         if owner_email not in self._events:
             logging.info(f"No events found for {owner_email}")
@@ -173,30 +147,25 @@ class CalendarClient:
         events = self._events[owner_email]
         filtered_events = []
         
+        # Ensure start_time and end_time are timezone-aware
+        if start_time.tzinfo is None:
+            start_time = start_time.astimezone()
+        if end_time.tzinfo is None:
+            end_time = end_time.astimezone()
+        
         for event in events:
-            # Convert event times to timezone-aware datetimes in EST
+            # Convert event times to datetime objects and ensure they are timezone-aware
             event_start = datetime.fromisoformat(event['start']['dateTime'])
             event_end = datetime.fromisoformat(event['end']['dateTime'])
             
-            # Ensure event times are timezone-aware
+            # Make event times timezone-aware if they aren't already
             if event_start.tzinfo is None:
-                event_start = EST.localize(event_start)
-            else:
-                event_start = event_start.astimezone(EST)
-                
+                event_start = event_start.astimezone()
             if event_end.tzinfo is None:
-                event_end = EST.localize(event_end)
-            else:
-                event_end = event_end.astimezone(EST)
-            
-            # Update event times
-            event['start']['dateTime'] = event_start.isoformat()
-            event['end']['dateTime'] = event_end.isoformat()
+                event_end = event_end.astimezone()
             
             # Filter by date range if specified
-            if start_date and event_end < start_date:
-                continue
-            if end_date and event_start > end_date:
+            if start_time > event_end or end_time < event_start:
                 continue
                 
             filtered_events.append(event)
@@ -209,32 +178,24 @@ class CalendarClient:
 
     def find_free_slots(self,
                        duration_minutes: int,
-                       start_date: datetime = None,
-                       end_date: datetime = None,
-                       calendar_id: str = 'primary',
+                       start_time: datetime,
+                       end_time: datetime,
                        attendees: List[str] = None) -> List[Dict[str, Any]]:
-        """Find available time slots of specified duration.
+        """Find available time slots for a meeting.
         
         Args:
-            duration_minutes: Required duration in minutes
-            start_date: Start of the search range
-            end_date: End of the search range
-            calendar_id: ID of the calendar to search in
-            attendees: List of attendee emails to check availability for
+            duration_minutes: Meeting duration in minutes
+            start_time: Start of search range in local time
+            end_time: End of search range in local time
+            attendees: List of attendee emails
             
         Returns:
-            List of possible start times with rationale
+            List of available start times in local time
         """
-        if not start_date:
-            start_date = datetime.now(EST)
-        if not end_date:
-            end_date = start_date + timedelta(days=7)
-            
-        # Convert to EST timezone if not already
-        if start_date.tzinfo != EST:
-            start_date = start_date.astimezone(EST)
-        if end_date.tzinfo != EST:
-            end_date = end_date.astimezone(EST)
+        if not start_time:
+            start_time = datetime.now()
+        if not end_time:
+            end_time = start_time + timedelta(days=7)
             
         # Validate duration against business hours
         total_business_minutes = (BUSINESS_END_HOUR - BUSINESS_START_HOUR) * 60
@@ -244,7 +205,7 @@ class CalendarClient:
                 'conflicts': [],
                 'rationale': (
                     f"Meeting duration ({duration_minutes} minutes) exceeds total business hours "
-                    f"({BUSINESS_START_HOUR} AM - {BUSINESS_END_HOUR-12} PM EST = {total_business_minutes} minutes)"
+                    f"({BUSINESS_START_HOUR} AM - {BUSINESS_END_HOUR-12} PM = {total_business_minutes} minutes)"
                 )
             }]
             
@@ -259,7 +220,7 @@ class CalendarClient:
         all_busy_periods = []
         if attendees:
             for attendee in attendees:
-                events = self.get_events(start_date, end_date, calendar_id, attendee)
+                events = self.get_events(start_time, end_time, attendee)
                 for event in events:
                     start = datetime.fromisoformat(event['start']['dateTime'])
                     end = datetime.fromisoformat(event['end']['dateTime'])
@@ -275,13 +236,11 @@ class CalendarClient:
             
         # Find free slots
         free_slots = []
-        current_time = start_date
+        current_time = start_time
         
         # Only consider business hours
         def next_business_hour(dt: datetime) -> datetime:
             """Get the next valid business hour, considering meeting duration."""
-            dt = dt.astimezone(EST)
-            
             # If before business hours, move to start of business hours
             if dt.hour < BUSINESS_START_HOUR:
                 return dt.replace(hour=BUSINESS_START_HOUR, minute=0)
@@ -294,14 +253,13 @@ class CalendarClient:
         
         current_time = next_business_hour(current_time)
         
-        while current_time < end_date:
+        while current_time < end_time:
             # Calculate meeting end time
             slot_end = current_time + timedelta(minutes=duration_minutes)
-            slot_end_est = slot_end.astimezone(EST)
             
             # Skip if meeting would end after business hours
-            if (slot_end_est.hour > BUSINESS_END_HOUR or 
-                (slot_end_est.hour == BUSINESS_END_HOUR and slot_end_est.minute > 0)):
+            if (slot_end.hour > BUSINESS_END_HOUR or 
+                (slot_end.hour == BUSINESS_END_HOUR and slot_end.minute > 0)):
                 # Move to the start of the next business day
                 current_time = (current_time + timedelta(days=1)).replace(hour=BUSINESS_START_HOUR, minute=0)
                 continue
@@ -324,12 +282,12 @@ class CalendarClient:
             
             if not conflicts:
                 rationale = (
-                    f"Found a free slot at {current_time.strftime('%I:%M %p')} - {slot_end.strftime('%I:%M %p')} EST "
+                    f"Found a free slot at {current_time.strftime('%I:%M %p')} - {slot_end.strftime('%I:%M %p')} "
                     f"where all attendees are available and meeting fits within business hours "
-                    f"({BUSINESS_START_HOUR} AM - {BUSINESS_END_HOUR-12} PM EST)."
+                    f"({BUSINESS_START_HOUR} AM - {BUSINESS_END_HOUR-12} PM)."
                 )
             else:
-                rationale = f"Slot at {current_time.strftime('%I:%M %p')} - {slot_end.strftime('%I:%M %p')} EST has conflicts:\n"
+                rationale = f"Slot at {current_time.strftime('%I:%M %p')} - {slot_end.strftime('%I:%M %p')} has conflicts:\n"
                 for conflict in conflicts:
                     rationale += f"- {conflict['attendee']} has '{conflict['title']}' from {conflict['start'].strftime('%I:%M %p')} to {conflict['end'].strftime('%I:%M %p')}\n"
             

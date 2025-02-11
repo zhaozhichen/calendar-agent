@@ -84,14 +84,15 @@ import os
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+import traceback
 
 # Add the project root directory to Python path
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(project_root)
 
-from src.agents.base_agent import MeetingRequest, CalendarAgent
+from src.agents.base_agent import MeetingRequest, CalendarAgent, MeetingProposal
 from src.api.calendar_client import CalendarClient
-from src.constants import EST, BUSINESS_START_HOUR, BUSINESS_END_HOUR
+from src.constants import BUSINESS_START_HOUR, BUSINESS_END_HOUR
 from src.init_test_data import create_test_data
 
 # Initialize FastAPI app
@@ -169,19 +170,19 @@ async def get_availability(
 ):
     """Get an agent's calendar availability."""
     try:
-        # Convert times to datetime objects with UTC timezone
+        # Convert times to datetime objects
         start_date = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
         end_date = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
         
-        # Convert to EST
-        start_est = start_date.astimezone(EST)
-        end_est = end_date.astimezone(EST)
+        # Convert to local time
+        start_local = start_date.astimezone()
+        end_local = end_date.astimezone()
         
         logging.info(f"Fetching availability for {email}")
-        logging.info(f"Date range: {start_est.strftime('%Y-%m-%d %H:%M %Z')} to {end_est.strftime('%Y-%m-%d %H:%M %Z')}")
+        logging.info(f"Date range: {start_local.strftime('%Y-%m-%d %H:%M %Z')} to {end_local.strftime('%Y-%m-%d %H:%M %Z')}")
         
         # Use the global calendar client
-        events = calendar_client.get_events(start_est, end_est, owner_email=email)
+        events = calendar_client.get_events(start_local, end_local, owner_email=email)
         
         logging.info(f"Found {len(events)} events")
         
@@ -225,8 +226,8 @@ async def get_availability(
         
         response = {
             'email': email,
-            'start_time': start_est.isoformat(),
-            'end_time': end_est.isoformat(),
+            'start_time': start_local.isoformat(),
+            'end_time': end_local.isoformat(),
             'events': formatted_events
         }
         logging.info(f"Returning response with {len(formatted_events)} events")
@@ -240,20 +241,20 @@ async def get_availability(
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
+    format='%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
     handlers=[
         logging.FileHandler('calendar_agent.log'),
         logging.StreamHandler(sys.stderr)
     ]
 )
 
-def _validate_meeting_duration(duration_minutes: int, start_est: datetime, end_est: datetime) -> Optional[Dict[str, str]]:
+def _validate_meeting_duration(duration_minutes: int, start_local: datetime, end_local: datetime) -> Optional[Dict[str, str]]:
     """Validate meeting duration against business hours.
     
     Args:
         duration_minutes: Meeting duration in minutes
-        start_est: Start time in EST
-        end_est: End time in EST
+        start_local: Start time in local time
+        end_local: End time in local time
         
     Returns:
         Error response if validation fails, None if successful
@@ -262,7 +263,7 @@ def _validate_meeting_duration(duration_minutes: int, start_est: datetime, end_e
     if duration_minutes > total_business_minutes:
         error_msg = (
             f"Meeting duration ({duration_minutes} minutes) exceeds available business hours "
-            f"({BUSINESS_START_HOUR} AM - {BUSINESS_END_HOUR-12} PM EST = {total_business_minutes} minutes)."
+            f"({BUSINESS_START_HOUR} AM - {BUSINESS_END_HOUR-12} PM = {total_business_minutes} minutes)."
         )
         logging.error(error_msg)
         return {
@@ -295,8 +296,8 @@ def _validate_business_hours(proposed_start: datetime, proposed_end: datetime) -
         proposed_end_str = proposed_end.strftime('%I:%M %p')
         
         error_msg = (
-            f"Meeting must be scheduled between {BUSINESS_START_HOUR} AM and {BUSINESS_END_HOUR-12} PM EST.\n"
-            f"Your proposed time ({proposed_start_str} - {proposed_end_str} EST) "
+            f"Meeting must be scheduled between {BUSINESS_START_HOUR} AM and {BUSINESS_END_HOUR-12} PM.\n"
+            f"Your proposed time ({proposed_start_str} - {proposed_end_str}) "
             f"{'starts too early' if proposed_start.hour < BUSINESS_START_HOUR else 'would end after business hours'}."
         )
         logging.error(error_msg)
@@ -312,36 +313,36 @@ def _validate_business_hours(proposed_start: datetime, proposed_end: datetime) -
         }
     return None
 
-def _format_busy_periods(all_attendees: List[str], start_est: datetime, end_est: datetime) -> List[Dict[str, str]]:
+def _format_busy_periods(all_attendees: List[str], start_local: datetime, end_local: datetime) -> List[Dict[str, str]]:
     """Get and format busy periods for all attendees.
     
     Args:
         all_attendees: List of attendee emails
-        start_est: Start time in EST
-        end_est: End time in EST
+        start_local: Start time in local time
+        end_local: End time in local time
         
     Returns:
         List of formatted busy periods
     """
     busy_periods = []
     for attendee in all_attendees:
-        events = calendar_client.get_events(start_est, end_est, owner_email=attendee)
+        events = calendar_client.get_events(start_local, end_local, owner_email=attendee)
         for event in events:
-            event_start = datetime.fromisoformat(event['start']['dateTime']).astimezone(EST)
-            event_end = datetime.fromisoformat(event['end']['dateTime']).astimezone(EST)
+            event_start = datetime.fromisoformat(event['start']['dateTime']).astimezone()
+            event_end = datetime.fromisoformat(event['end']['dateTime']).astimezone()
             busy_periods.append({
                 'attendee': attendee,
                 'event': event['summary'],
-                'time': f"{event_start.strftime('%I:%M %p')} - {event_end.strftime('%I:%M %p')} EST"
+                'time': f"{event_start.strftime('%I:%M %p')} - {event_end.strftime('%I:%M %p')}"
             })
     return busy_periods
 
-def _format_no_slots_error(start_est: datetime, end_est: datetime, duration_minutes: int, busy_periods: List[Dict[str, str]]) -> Dict[str, str]:
+def _format_no_slots_error(start_local: datetime, end_local: datetime, duration_minutes: int, busy_periods: List[Dict[str, str]]) -> Dict[str, str]:
     """Format error message when no slots are available.
     
     Args:
-        start_est: Start time in EST
-        end_est: End time in EST
+        start_local: Start time in local time
+        end_local: End time in local time
         duration_minutes: Meeting duration in minutes
         busy_periods: List of busy periods
         
@@ -350,7 +351,7 @@ def _format_no_slots_error(start_est: datetime, end_est: datetime, duration_minu
     """
     error_msg = (
         f"Could not find any available {duration_minutes}-minute slots between "
-        f"{start_est.strftime('%Y-%m-%d %I:%M %p')} and {end_est.strftime('%Y-%m-%d %I:%M %p')} EST."
+        f"{start_local.strftime('%Y-%m-%d %I:%M %p')} and {end_local.strftime('%Y-%m-%d %I:%M %p')}."
     )
     logging.error(error_msg)
     logging.error("Busy periods:")
@@ -382,19 +383,19 @@ def _format_conflicts_info(conflicts: List[Dict[str, Any]], all_attendees: List[
     attendee_conflicts = {}
     
     for conflict in conflicts:
-        # Ensure all times are in EST
-        conflict_start = datetime.fromisoformat(conflict['start'].isoformat()).astimezone(EST)
-        conflict_end = datetime.fromisoformat(conflict['end'].isoformat()).astimezone(EST)
-        new_slot_start = conflict['new_slot_start'].astimezone(EST)
-        new_slot_end = conflict['new_slot_end'].astimezone(EST)
+        # Convert times to local timezone
+        conflict_start = datetime.fromisoformat(conflict['start'].isoformat()).astimezone()
+        conflict_end = datetime.fromisoformat(conflict['end'].isoformat()).astimezone()
+        new_slot_start = conflict['new_slot_start'].astimezone()
+        new_slot_end = conflict['new_slot_end'].astimezone()
         
         conflict_info = {
             "id": conflict['id'],  # Include the original event ID
             "title": conflict['title'],
-            "time": f"{conflict_start.strftime('%I:%M %p')} - {conflict_end.strftime('%I:%M %p')} EST",
+            "time": f"{conflict_start.strftime('%I:%M %p')} - {conflict_end.strftime('%I:%M %p')}",
             "attendees": conflict['attendees'],
             "priority": conflict.get('priority', 'N/A'),
-            "new_time": f"{new_slot_start.strftime('%I:%M %p')} - {new_slot_end.strftime('%I:%M %p')} EST"
+            "new_time": f"{new_slot_start.strftime('%I:%M %p')} - {new_slot_end.strftime('%I:%M %p')}"
         }
         conflicts_info.append(conflict_info)
         
@@ -424,8 +425,8 @@ def _format_negotiation_message(proposal: Dict[str, Any], attendee_conflicts: Di
         f"Scheduling '{proposal['title']}' (Priority: {proposal['priority']})\n"
         f"Found a potential slot at:\n"
         f"Date: {proposed_datetime.strftime('%A, %B %d, %Y')}\n"
-        f"Start: {proposed_datetime.strftime('%I:%M %p')} EST\n"
-        f"End: {end_datetime.strftime('%I:%M %p')} EST\n\n"
+        f"Start: {proposed_datetime.strftime('%I:%M %p')}\n"
+        f"End: {end_datetime.strftime('%I:%M %p')}\n\n"
         f"Organizer: {proposal['organizer']}\n"
         f"Attendees: {', '.join(proposal['attendees'])}\n\n"
         f"This time slot has conflicts that can be rescheduled:\n\n"
@@ -459,18 +460,18 @@ async def request_meeting(email: str, request: MeetingRequest):
         logging.info(f"Attendees: {', '.join(request.attendees)}")
         logging.info(f"Priority: {request.priority}")
         
-        # Convert date strings to datetime objects in EST
+        # Convert date strings to datetime objects
         start_date = datetime.fromisoformat(request.preferred_time_ranges[0][0].replace('Z', '+00:00'))
         end_date = datetime.fromisoformat(request.preferred_time_ranges[0][1].replace('Z', '+00:00'))
         
-        # Convert to EST
-        start_est = start_date.astimezone(EST)
-        end_est = end_date.astimezone(EST)
+        # Convert to local time
+        start_local = start_date.astimezone()
+        end_local = end_date.astimezone()
         
-        logging.info(f"Requested date range: {start_est.strftime('%Y-%m-%d %I:%M %p')} - {end_est.strftime('%Y-%m-%d %I:%M %p')} EST")
+        logging.info(f"Requested date range: {start_local.strftime('%Y-%m-%d %I:%M %p')} - {end_local.strftime('%Y-%m-%d %I:%M %p')}")
 
         # Validate meeting duration
-        duration_error = _validate_meeting_duration(request.duration_minutes, start_est, end_est)
+        duration_error = _validate_meeting_duration(request.duration_minutes, start_local, end_local)
         if duration_error:
             return duration_error
 
@@ -487,7 +488,7 @@ async def request_meeting(email: str, request: MeetingRequest):
             attendees=all_attendees,  # Use the combined list
             priority=request.priority,
             description=request.description,
-            preferred_time_ranges=[(start_est, end_est)]
+            preferred_time_ranges=request.preferred_time_ranges
         )
 
         # Get or create agent
@@ -498,20 +499,81 @@ async def request_meeting(email: str, request: MeetingRequest):
 
         # Find available slots within the preferred date range
         agent = CalendarAgent(email, calendar_client)
-        proposals = agent.find_meeting_slots(meeting_req, start_est, end_est)
+        proposals = agent.find_meeting_slots(meeting_req, start_local, end_local)
 
         if not proposals:
             # Get all attendees' busy periods for better error reporting
-            busy_periods = _format_busy_periods(all_attendees, start_est, end_est)
-            return _format_no_slots_error(start_est, end_est, request.duration_minutes, busy_periods)
+            busy_periods = _format_busy_periods(all_attendees, start_local, end_local)
+            return _format_no_slots_error(start_local, end_local, request.duration_minutes, busy_periods)
 
-        best_proposal = proposals[0]
+        # Log all proposals with their details
+        logging.info("\n=== Available Time Slots Analysis ===")
+        perfect_matches = [p for p in proposals if not p.conflicts]
+        if perfect_matches:
+            # Found slots with no conflicts - use the earliest one
+            earliest_perfect = min(perfect_matches, key=lambda p: p.proposed_start_time)
+            logging.info(f"\n=== Perfect Slot Found ===")
+            logging.info(f"Found {len(perfect_matches)} conflict-free slots between "
+                       f"{start_local.strftime('%Y-%m-%d')} and {end_local.strftime('%Y-%m-%d')}")
+            logging.info(f"Required duration: {request.duration_minutes} minutes")
+            logging.info(f"Meeting priority: {request.priority}")
+            logging.info("\nAvailable perfect slots:")
+            for idx, p in enumerate(perfect_matches, 1):
+                slot_end = p.proposed_start_time + timedelta(minutes=request.duration_minutes)
+                logging.info(f"{idx}. {p.proposed_start_time.strftime('%Y-%m-%d %I:%M %p')} "
+                           f"- {slot_end.strftime('%I:%M %p')}")
+            logging.info(f"\nSelected earliest perfect slot: {earliest_perfect.proposed_start_time.strftime('%Y-%m-%d %I:%M %p')}")
+            best_proposal = earliest_perfect
+        else:
+            # No perfect slots - rank feasible slots by impact score
+            feasible_proposals = []
+            logging.info("\n=== No Perfect Slots Available - Analyzing Slots with Conflicts ===")
+            
+            for p in proposals:
+                # Check if all conflicts can be moved (have lower or equal priority)
+                all_movable = True
+                for conflict in p.conflicts:
+                    if conflict.get('priority', 0) > request.priority:
+                        all_movable = False
+                        break
+                
+                if all_movable:
+                    feasible_proposals.append(p)
+                    conflict_details = [
+                        f"- {c['title']} (Priority: {c.get('priority', 'N/A')}) "
+                        f"with {len(c['attendees'])} attendees"
+                        for c in p.conflicts
+                    ]
+                    logging.info(
+                        f"\nSlot: {p.proposed_start_time.strftime('%Y-%m-%d %I:%M %p')}\n"
+                        f"Impact Score: {p.impact_score}\n"
+                        f"Conflicts:\n" + "\n".join(conflict_details)
+                    )
+            
+            if not feasible_proposals:
+                error_msg = "No feasible slots found - all potential slots have unmovable conflicts"
+                logging.error(error_msg)
+                return {"status": "error", "message": error_msg}
+            
+            # Sort feasible proposals by impact score
+            feasible_proposals.sort(key=lambda p: p.impact_score)
+            logging.info("\nRanked feasible slots by impact score:")
+            for idx, p in enumerate(feasible_proposals, 1):
+                logging.info(
+                    f"{idx}. {p.proposed_start_time.strftime('%Y-%m-%d %I:%M %p')} "
+                    f"- Impact Score: {p.impact_score} "
+                    f"- Conflicts: {len(p.conflicts)} "
+                    f"- Affected Attendees: {len(p.affected_attendees)}"
+                )
+            
+            best_proposal = feasible_proposals[0]
+            logging.info(f"\nSelected best feasible slot with lowest impact score: {best_proposal.impact_score}")
+
+        # Get proposed times in local timezone
+        proposed_start = best_proposal.proposed_start_time.astimezone()
+        proposed_end = (proposed_start + timedelta(minutes=request.duration_minutes)).astimezone()
         
-        # Get proposed times in EST
-        proposed_start = best_proposal.proposed_start_time.astimezone(EST)
-        proposed_end = (proposed_start + timedelta(minutes=request.duration_minutes)).astimezone(EST)
-        
-        logging.info(f"\nBest proposal found: {proposed_start.strftime('%I:%M %p')} - {proposed_end.strftime('%I:%M %p')} EST")
+        logging.info(f"\nProceeding with slot: {proposed_start.strftime('%I:%M %p')} - {proposed_end.strftime('%I:%M %p')}")
         
         # Validate business hours constraints
         hours_error = _validate_business_hours(proposed_start, proposed_end)
@@ -519,18 +581,47 @@ async def request_meeting(email: str, request: MeetingRequest):
             return hours_error
 
         if not best_proposal.conflicts:
-            # Schedule the meeting
+            # Double check for any conflicts at the proposed time
+            all_conflicts = []
+            for attendee in all_attendees:
+                events = calendar_client.get_events(proposed_start, proposed_end, owner_email=attendee)
+                for event in events:
+                    event_start = datetime.fromisoformat(event['start']['dateTime']).astimezone()
+                    event_end = datetime.fromisoformat(event['end']['dateTime']).astimezone()
+                    
+                    # Check for overlap
+                    if (event_start < proposed_end and event_end > proposed_start):
+                        all_conflicts.append({
+                            'title': event['summary'],
+                            'attendee': attendee,
+                            'start': event_start,
+                            'end': event_end
+                        })
+            
+            if all_conflicts:
+                error_msg = "Found unexpected conflicts:\n"
+                for conflict in all_conflicts:
+                    error_msg += f"- {conflict['title']} with {conflict['attendee']} "
+                    error_msg += f"({conflict['start'].strftime('%I:%M %p')} - {conflict['end'].strftime('%I:%M %p')})\n"
+                logging.error(error_msg)
+                return {
+                    "status": "error",
+                    "message": f"Cannot schedule meeting due to conflicts:\n{error_msg}"
+                }
+            
+            # No conflicts found, safe to schedule
             event = calendar_client.create_event(
                 summary=request.title,
                 start_time=proposed_start,
                 end_time=proposed_end,
                 description=request.description,
                 attendees=all_attendees,  # Use the combined list
-                organizer=request.organizer
+                organizer=request.organizer,
+                priority=request.priority  # Add priority to the event
             )
             success_msg = (
                 f"Successfully scheduled meeting '{request.title}' for "
-                f"{proposed_start.strftime('%Y-%m-%d %I:%M %p')} - {proposed_end.strftime('%I:%M %p')} EST"
+                f"{proposed_start.strftime('%Y-%m-%d %I:%M %p')} - {proposed_end.strftime('%I:%M %p')}"
             )
             logging.info(success_msg)
             return {
@@ -542,10 +633,32 @@ async def request_meeting(email: str, request: MeetingRequest):
             # Need negotiation
             proposal_id = str(uuid.uuid4())
             
+            logging.info("\n=== Slot Availability Analysis ===")
+            logging.info(f"Searching for available slots between {start_local.strftime('%Y-%m-%d')} and {end_local.strftime('%Y-%m-%d')}")
+            logging.info(f"Required duration: {request.duration_minutes} minutes")
+            logging.info(f"Meeting priority: {request.priority}")
+            
+            # Log perfect slots if any were found but not selected
+            perfect_slots = [p for p in proposals if not p.conflicts]
+            if perfect_slots:
+                logging.info("\nPerfect slots were found but not selected (likely outside preferred time range):")
+                for slot in perfect_slots:
+                    logging.info(f"- {slot.proposed_start_time.strftime('%Y-%m-%d %I:%M %p')} - "
+                               f"{(slot.proposed_start_time + timedelta(minutes=request.duration_minutes)).strftime('%I:%M %p')}")
+            else:
+                logging.info("\nNo perfect slots found - negotiation will be required.")
+            
             logging.info("\n=== Negotiation Required ===")
-            logging.info(f"Proposed time: {proposed_start.strftime('%I:%M %p')} - {proposed_end.strftime('%I:%M %p')} EST")
+            logging.info(f"Selected best proposal with conflicts:")
+            logging.info(f"Proposed time: {proposed_start.strftime('%I:%M %p')} - {proposed_end.strftime('%I:%M %p')}")
             logging.info(f"Number of conflicts: {len(best_proposal.conflicts)}")
             logging.info("Conflicting meetings:")
+            for conflict in best_proposal.conflicts:
+                logging.info(f"- Meeting: {conflict['title']}")
+                logging.info(f"  Current time: {conflict['start'].strftime('%I:%M %p')} - {conflict['end'].strftime('%I:%M %p')}")
+                logging.info(f"  New time: {conflict['new_slot_start'].strftime('%I:%M %p')} - {conflict['new_slot_end'].strftime('%I:%M %p')}")
+                logging.info(f"  Priority: {conflict.get('priority', 'N/A')}")
+                logging.info(f"  Attendees: {', '.join(conflict['attendees'])}\n")
             
             # Format conflicts information
             conflicts_info, attendee_conflicts = _format_conflicts_info(best_proposal.conflicts, all_attendees)
@@ -578,151 +691,107 @@ async def request_meeting(email: str, request: MeetingRequest):
         error_msg = f"Error scheduling meeting: {str(e)}\n\n"
         error_msg += "Debug information:\n"
         error_msg += f"- Requested duration: {request.duration_minutes} minutes\n"
-        error_msg += f"- Date range: {start_est.strftime('%Y-%m-%d')} to {end_est.strftime('%Y-%m-%d')}\n"
+        error_msg += f"- Date range: {start_local.strftime('%Y-%m-%d')} to {end_local.strftime('%Y-%m-%d')}\n"
         error_msg += f"- Attendees: {', '.join(request.attendees)}\n"
         logging.error(error_msg, exc_info=True)
         return {"status": "error", "message": error_msg}
 
+def parse_time_str(time_str: str, base_date: datetime.date) -> datetime:
+    """Parse time string in either 12-hour or 24-hour format."""
+    try:
+        # First try 12-hour format (e.g., "3:15 PM")
+        dt = datetime.strptime(time_str, "%I:%M %p")
+        return datetime.combine(base_date, dt.time())
+    except ValueError:
+        try:
+            # Then try 24-hour format (e.g., "15:15")
+            dt = datetime.strptime(time_str, "%H:%M")
+            return datetime.combine(base_date, dt.time())
+        except ValueError:
+            # Finally try full datetime string
+            return datetime.fromisoformat(time_str)
+
 @app.post("/agents/{email}/negotiate")
 async def negotiate_meeting(email: str, proposal_id: str, action: str):
     """Handle meeting negotiation."""
+    if action not in ["accept", "reject"]:
+        return {"status": "error", "message": "Invalid action"}
+        
+    if action == "reject":
+        return {"status": "success", "message": "Meeting proposal rejected"}
+        
     try:
-        if proposal_id not in active_negotiations:
-            return {
-                "status": "error",
-                "message": "Invalid or expired negotiation proposal"
-            }
+        # Get the proposal from cache
+        proposal = active_negotiations.get(proposal_id)
+        if not proposal:
+            return {"status": "error", "message": "Proposal not found or expired"}
             
-        proposal = active_negotiations[proposal_id]
+        # Get the agent and calendar client
         agent = CalendarAgent(email, calendar_client)
         
-        if action == "accept":
-            # Create MeetingRequest object
-            from src.agents.base_agent import MeetingRequest, MeetingProposal
+        # Parse the proposed times
+        proposed_start = datetime.fromisoformat(proposal["start_time"])
+        proposed_end = proposed_start + timedelta(minutes=proposal["duration_minutes"])
+        
+        # Prepare conflicts with their original and new times
+        conflicts = []
+        for conflict in proposal.get("conflicts", []):
+            # Parse the original time range
+            original_time_parts = conflict["time"].split(" - ")
+            base_date = proposed_start.date()
+            conflict_start = parse_time_str(original_time_parts[0], base_date)
+            conflict_end = parse_time_str(original_time_parts[1], base_date)
             
-            meeting_req = MeetingRequest(
+            # Parse the new time range
+            new_time_parts = conflict["new_time"].split(" - ")
+            new_start = parse_time_str(new_time_parts[0], base_date)
+            new_end = parse_time_str(new_time_parts[1], base_date)
+            
+            conflicts.append({
+                "id": conflict["id"],
+                "title": conflict["title"],
+                "start": conflict_start,
+                "end": conflict_end,
+                "new_slot_start": new_start,
+                "new_slot_end": new_end,
+                "attendees": conflict["attendees"],
+                "priority": conflict.get("priority", 3)
+            })
+        
+        # Import the correct MeetingRequest class
+        from src.agents.base_agent import MeetingRequest as AgentMeetingRequest
+        
+        # Execute the negotiation
+        result = agent.negotiate_meeting_time(MeetingProposal(
+            request=AgentMeetingRequest(
                 title=proposal["title"],
                 duration_minutes=proposal["duration_minutes"],
                 organizer=proposal["organizer"],
                 attendees=proposal["attendees"],
                 priority=proposal["priority"],
-                description=proposal.get("description")
-            )
-            
-            # Convert conflicts to include datetime objects
-            formatted_conflicts = []
-            for conflict in proposal["conflicts"]:
-                # Parse the original time
-                original_time_parts = conflict["time"].split(" - ")
-                original_start_str = original_time_parts[0]
-                original_end_str = original_time_parts[1].split(" EST")[0].strip()
-                
-                # Parse the new time
-                new_time_parts = conflict["new_time"].split(" - ")
-                new_start_str = new_time_parts[0]
-                new_end_str = new_time_parts[1].split(" EST")[0].strip()
-                
-                # Get the date from the proposal's start time
-                base_date = datetime.fromisoformat(proposal["start_time"]).astimezone(EST).date()
-                
-                # Convert times to datetime objects with proper timezone
-                original_start = datetime.strptime(f"{base_date} {original_start_str}", "%Y-%m-%d %I:%M %p").replace(tzinfo=EST)
-                original_end = datetime.strptime(f"{base_date} {original_end_str}", "%Y-%m-%d %I:%M %p").replace(tzinfo=EST)
-                new_slot_start = datetime.strptime(f"{base_date} {new_start_str}", "%Y-%m-%d %I:%M %p").replace(tzinfo=EST)
-                new_slot_end = datetime.strptime(f"{base_date} {new_end_str}", "%Y-%m-%d %I:%M %p").replace(tzinfo=EST)
-                
-                formatted_conflicts.append({
-                    'id': conflict.get("id", str(uuid.uuid4())),
-                    'title': conflict["title"],
-                    'start': original_start,
-                    'end': original_end,
-                    'attendees': conflict["attendees"],
-                    'priority': conflict.get("priority", "N/A"),
-                    'new_slot_start': new_slot_start,
-                    'new_slot_end': new_slot_end
-                })
-            
-            # Create MeetingProposal object with timezone-aware datetime
-            proposed_start = datetime.fromisoformat(proposal["start_time"]).astimezone(EST)
-            # Ensure minutes are set to 00 or 30
-            if proposed_start.minute % 30 != 0:
-                proposed_start = proposed_start.replace(minute=(proposed_start.minute // 30) * 30)
-                
-            meeting_proposal = MeetingProposal(
-                request=meeting_req,
-                proposed_start_time=proposed_start,
-                conflicts=formatted_conflicts,
-                affected_attendees=proposal["affected_attendees"],
-                impact_score=len(proposal["conflicts"]) + len(proposal["affected_attendees"]) * 0.5
-            )
-            
-            # Use the agent's negotiate_meeting_time method
-            result = agent.negotiate_meeting_time(meeting_proposal)
-            
-            if result["status"] == "success":
-                # Format the event for frontend consumption
-                event_start = result["event"].get('start_time', result["event"].get('start', {}).get('dateTime', ''))
-                event_end = result["event"].get('end_time', result["event"].get('end', {}).get('dateTime', ''))
-                
-                # Ensure times are timezone-aware
-                if isinstance(event_start, str):
-                    event_start = datetime.fromisoformat(event_start).astimezone(EST)
-                if isinstance(event_end, str):
-                    event_end = datetime.fromisoformat(event_end).astimezone(EST)
-                
-                formatted_event = {
-                    'id': result["event"].get('id', str(uuid.uuid4())),
-                    'title': result["event"].get('title') or result["event"].get('summary', ''),
-                    'start': event_start.isoformat(),
-                    'end': event_end.isoformat(),
-                    'description': result["event"].get('description', ''),
-                    'attendees': [{'email': email} for email in proposal["attendees"]],
-                    'organizer': {'email': proposal["organizer"]},
-                    'priority': proposal["priority"]
-                }
-                
-                # Format rescheduled meetings for frontend
-                formatted_reschedules = []
-                for meeting in result["moved_events"].values():
-                    # Ensure start and end times are timezone-aware
-                    start_time = meeting['start_time'].astimezone(EST) if meeting['start_time'].tzinfo else meeting['start_time'].replace(tzinfo=EST)
-                    end_time = meeting['end_time'].astimezone(EST) if meeting['end_time'].tzinfo else meeting['end_time'].replace(tzinfo=EST)
-                    
-                    formatted_reschedules.append({
-                        'id': meeting.get('id', str(uuid.uuid4())),
-                        'title': meeting['title'],
-                        'start': start_time.isoformat(),
-                        'end': end_time.isoformat(),
-                        'description': f"Rescheduled from {meeting['original_time']} due to conflict",
-                        'attendees': [{'email': email} for email in meeting['attendees']],
-                        'priority': meeting['priority'],
-                        'original_time': meeting['original_time'],
-                        'new_time': f"{start_time.strftime('%I:%M %p')} - {end_time.strftime('%I:%M %p')} EST"
-                    })
-                
-                # Clean up the negotiation
-                del active_negotiations[proposal_id]
-                
-                return {
-                    "status": "success",
-                    "message": f"Successfully scheduled meeting '{proposal['title']}'",
-                    "event": formatted_event,
-                    "rescheduled_meetings": formatted_reschedules
-                }
-            else:
-                return {
-                    "status": "error",
-                    "message": result["message"]
-                }
-        else:
+                description=proposal.get("description"),
+                preferred_time_ranges=[(proposed_start, proposed_end)]  # Use datetime objects directly
+            ),
+            proposed_start_time=proposed_start,
+            conflicts=conflicts,
+            affected_attendees=proposal["affected_attendees"],
+            impact_score=proposal.get("impact_score", 0)
+        ))
+        
+        if result["status"] == "success":
             return {
-                "status": "error",
-                "message": "Invalid negotiation action"
+                "status": "success",
+                "message": "Meeting scheduled successfully",
+                "event": result["event"],
+                "rescheduled_meetings": result.get("moved_events", [])
             }
+        else:
+            return result
             
     except Exception as e:
         error_msg = f"Error processing negotiation: {str(e)}"
-        logging.error(error_msg, exc_info=True)
+        logging.error(error_msg)
+        logging.error(traceback.format_exc())
         return {"status": "error", "message": error_msg}
 
 @app.post("/agents/{email}/evaluate_priority")

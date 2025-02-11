@@ -4,11 +4,9 @@ An intelligent calendar management system that uses AI agents to coordinate and 
 
 ## Features
 
-- Calendar Integration: Full access to Google Calendar for viewing, creating, updating, and deleting events
-- Agent Communication: Inter-agent protocol for negotiating meeting times
 - Smart Scheduling: Intelligent rescheduling of lower priority meetings to accommodate important group meetings
 - Priority-based Decision Making: Evaluation of meeting priorities for optimal scheduling decisions
-- Demo Calendar: Built-in demo calendar for testing and demonstration purposes
+- Mock Calendar: Built-in mock calendar for testing and demonstration purposes
 - Web Interface: Modern web interface for managing meetings and viewing schedules
 
 ## Setup
@@ -24,38 +22,60 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-3. Set up Google Calendar API:
-- Go to Google Cloud Console
-- Create a new project
-- Enable the Google Calendar API
-- Create OAuth 2.0 credentials
-- Download the credentials file as `credentials.json`
-- Place it in the project root directory
-
-4. Create a `.env` file with the following variables:
+3. Create a `.env` file with any custom configurations (optional):
 ```
-GOOGLE_CALENDAR_CREDENTIALS_FILE=credentials.json
+PORT=8000  # Optional, defaults to 8000
 ```
 
-5. Run the server locally:
+## Running Locally
+
+### Development Server
+
+1. Start the server:
 ```bash
 python src/run_server.py
 ```
 
 The server will start at http://localhost:8000
 
+2. Access the web interface:
+- Open your browser and navigate to http://localhost:8000
+- Select a test user from the dropdown to view their calendar
+- Use the "Schedule Meeting" button to create new meetings
+- The system will automatically handle conflicts based on meeting priorities
+
+### Test Data
+
+The system initializes with either:
+- Random meetings: 8 meetings per business day for the next month
+- Fixed test meetings: A predefined set of meetings for testing
+
+To switch between modes, modify the `use_fixed_meetings` parameter in `src/run_server.py`.
+
+### Business Hours
+
+The system operates during business hours (9 AM - 5 PM) in your local timezone. Meetings are only scheduled during these hours on business days (Monday-Friday).
+
 ## Project Structure
 
 ```
 calendar_agent/
 ├── src/
-│   ├── api/           # Calendar API integration
+│   ├── api/           # Calendar API and server endpoints
 │   ├── agents/        # Agent implementation
-│   └── utils/         # Utility functions
+│   ├── static/        # Web interface assets (HTML, CSS, JS)
+│   ├── utils/         # Utility functions
+│   ├── cli.py         # Command-line interface
+│   ├── constants.py   # System constants
+│   ├── init_test_data.py  # Test data initialization
+│   └── run_server.py  # Server startup script
 ├── tests/             # Test files
-├── docs/              # Documentation
-├── requirements.txt   # Project dependencies
-└── README.md         # This file
+├── examples/          # Usage examples
+├── docs/             # Documentation
+├── requirements.txt  # Project dependencies
+├── Procfile         # Render deployment configuration
+├── render.yaml      # Render service configuration
+└── README.md        # This file
 ```
 
 ## Development
@@ -120,7 +140,7 @@ Meetings are assigned priority levels from 1 (lowest) to 5 (highest). The priori
 
 1. **Initial Availability Check**
    - System checks all attendees' calendars for the requested time period
-   - Considers business hours (9 AM - 5 PM EST by default)
+   - Considers business hours (9 AM - 5 PM)
    - Identifies potential time slots that fit the meeting duration
 
 2. **Conflict Resolution**
@@ -188,15 +208,6 @@ Resolution:
    - Schedules "Important Team Sync" at 2 PM
    - Notifies all affected attendees
 ```
-
-### Implementation Details
-
-The negotiation logic is implemented in the `CalendarAgent` class with these key methods:
-- `evaluate_meeting_priority()`: Calculates meeting priority
-- `find_meeting_slots()`: Finds available slots and identifies conflicts
-- `negotiate_meeting_time()`: Handles the negotiation process
-- `_prepare_moved_events()`: Prepares the rescheduling plan
-- `_create_rescheduled_events()`: Executes the approved changes
 
 ## License
 

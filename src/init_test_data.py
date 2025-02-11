@@ -4,9 +4,10 @@ Initialize test data for the calendar agent system.
 from datetime import datetime, timedelta
 import random
 from typing import List
+import logging
 
 from src.api.calendar_client import CalendarClient
-from src.constants import EST, BUSINESS_START_HOUR, BUSINESS_END_HOUR
+from src.constants import BUSINESS_START_HOUR, BUSINESS_END_HOUR
 
 # Test users
 TEST_USERS = [
@@ -294,6 +295,7 @@ def create_fixed_meetings(calendar_client: CalendarClient, active_agents: List[s
     """
     # Start from today and ensure we start at the beginning of a week (Monday)
     start_date = datetime.now()
+    logging.info(f"Initial start_date: {start_date}")
     while start_date.weekday() != 0:  # 0 = Monday
         start_date = start_date + timedelta(days=1)
     
@@ -330,7 +332,9 @@ def create_fixed_meetings(calendar_client: CalendarClient, active_agents: List[s
                     second=0,
                     microsecond=0
                 )
+                logging.info(f"Before create_event - meeting_start: {meeting_start}")
                 meeting_end = meeting_start + timedelta(minutes=meeting["duration_minutes"])
+                logging.info(f"Before create_event - meeting_end: {meeting_end}")
                 
                 # Ensure organizer is in attendees list
                 all_attendees = list(set([meeting["organizer"]] + meeting["attendees"]))
@@ -355,18 +359,26 @@ def create_random_meetings(calendar_client: CalendarClient, active_agents: List[
         active_agents: List of active agent emails
     """
     start_date = datetime.now()
-    for day in range(14):
+    end_date = start_date + timedelta(days=30)  # One month period
+    
+    logging.info(f"Creating random meetings from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+    
+    for day in range(31):  # 0-30 days
         current_date = start_date + timedelta(days=day)
         
-        # Create 4 meetings per day between 9 AM and 5 PM
+        # Skip weekends
+        if current_date.weekday() >= 5:  # 5 is Saturday, 6 is Sunday
+            continue
+            
+        # Create 8 meetings per day between 9 AM and 5 PM
         # Calculate available time slots
         time_slots = []
         for hour in range(9, 17):  # 9 AM to 4 PM (to allow for 1-hour meetings)
             for minute in [0, 15, 30, 45]:
                 time_slots.append((hour, minute))
         
-        # Randomly select 4 time slots without replacement
-        selected_slots = random.sample(time_slots, 4)
+        # Randomly select 8 time slots without replacement
+        selected_slots = random.sample(time_slots, min(8, len(time_slots)))
         
         for hour, minute in selected_slots:
             # Select random meeting template
@@ -397,9 +409,9 @@ def create_random_meetings(calendar_client: CalendarClient, active_agents: List[
                         organizer=organizer,
                         priority=template["priority"]
                     )
-                    print(f"✓ Created meeting: {template['title']} (Priority: {template['priority']}) ({organizer}) at {meeting_start.strftime('%I:%M %p')}")
+                    logging.info(f"Created meeting: {template['title']} (Priority: {template['priority']}) ({organizer}) at {meeting_start.strftime('%Y-%m-%d %I:%M %p')}")
 
-def create_test_data(calendar_client: CalendarClient, use_fixed_meetings: bool = True) -> List[str]:
+def create_test_data(calendar_client: CalendarClient, use_fixed_meetings: bool = False) -> List[str]:
     """Create all test data for the application.
     
     Args:
@@ -413,9 +425,16 @@ def create_test_data(calendar_client: CalendarClient, use_fixed_meetings: bool =
     active_agents = create_test_agents(calendar_client)
     
     print("\n=== Creating Test Meetings ===")
+    logging.info("==================================================")
+    logging.info(f"Initialization mode: {'FIXED' if use_fixed_meetings else 'RANDOM'} meetings")
+    logging.info("==================================================")
+    
     if use_fixed_meetings:
+        logging.info("Using fixed meeting schedule")
         create_fixed_meetings(calendar_client, active_agents)
     else:
+        logging.info("Using random meeting generation for next 31 days")
+        logging.info("Will create 8 meetings per business day")
         create_random_meetings(calendar_client, active_agents)
     
     return active_agents 
