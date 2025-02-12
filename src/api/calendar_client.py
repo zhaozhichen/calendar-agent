@@ -230,7 +230,7 @@ class CalendarClient:
                         'start': start,
                         'end': end,
                         'attendee': attendee,
-                        'title': event['summary']
+                        'summary': event['summary']
                     })
             
         # Sort busy periods
@@ -291,7 +291,17 @@ class CalendarClient:
             else:
                 rationale = f"Slot at {current_time.strftime('%I:%M %p')} - {slot_end.strftime('%I:%M %p')} has conflicts:\n"
                 for conflict in conflicts:
-                    rationale += f"- {conflict['attendee']} has '{conflict['title']}' from {conflict['start'].strftime('%I:%M %p')} to {conflict['end'].strftime('%I:%M %p')}\n"
+                    # Add conflict information
+                    conflicts.append({
+                        'attendee': conflict['attendee'],
+                        'summary': conflict['summary'],
+                        'start': conflict['start'],
+                        'end': conflict['end'],
+                        'priority': conflict.get('priority', 3)  # Default to medium priority
+                    })
+                    
+                    # Add to rationale
+                    rationale += f"- {conflict['attendee']} has '{conflict['summary']}' from {conflict['start'].strftime('%I:%M %p')} to {conflict['end'].strftime('%I:%M %p')}\n"
             
             free_slots.append({
                 'start_time': current_time,

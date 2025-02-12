@@ -1,5 +1,5 @@
 // API configuration
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = window.location.origin;
 
 // Calendar instance
 let calendar;
@@ -510,11 +510,11 @@ function formatConflicts(conflicts) {
     return Array.from(uniqueConflictsMap.values())
         .map(conflict => 
             `<div class="conflict-item mb-3 p-3 border-start border-warning border-3">
-                <strong>${conflict.title}</strong> 
+                <strong>${conflict.summary}</strong> 
                 <span class="badge bg-secondary ms-1">Priority: ${conflict.priority || 'N/A'}</span><br>
                 <div class="ms-2 mt-2">
-                    <div class="text-danger"><strong>Current time:</strong> ${conflict.time}</div>
-                    <div class="text-success"><strong>Will be moved to:</strong> ${conflict.new_time}</div>
+                    <div class="text-danger"><strong>Current time:</strong> ${conflict.start} - ${conflict.end}</div>
+                    <div class="text-success"><strong>Will be moved to:</strong> ${conflict.new_slot_start} - ${conflict.new_slot_end}</div>
                     <div class="mt-1"><strong>Attendees:</strong> ${conflict.attendees.join(', ')}</div>
                 </div>
             </div>`

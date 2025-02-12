@@ -219,7 +219,7 @@ class CalendarAgent:
                     # Add conflict information
                     conflict = {
                         'id': event['id'],
-                        'title': event['summary'],
+                        'summary': event['summary'],
                         'start': event_start,
                         'end': event_end,
                         'attendees': [a['email'] for a in event.get('attendees', [])],
@@ -245,7 +245,7 @@ class CalendarAgent:
                 proposed_end = current_time + timedelta(minutes=request.duration_minutes)
                 
                 for conflict in conflicts:
-                    logging.info(f"\nFinding alternative slot for conflict: {conflict['title']}")
+                    logging.info(f"\nFinding alternative slot for conflict: {conflict['summary']}")
                     logging.info(f"Current time: {conflict['start'].strftime('%I:%M %p')} - {conflict['end'].strftime('%I:%M %p')}")
                     logging.info(f"Attendees: {', '.join(conflict['attendees'])}")
                     
@@ -260,11 +260,11 @@ class CalendarAgent:
                     if alternative_slot:
                         conflict['new_slot_start'] = alternative_slot
                         conflict['new_slot_end'] = alternative_slot + (conflict['end'] - conflict['start'])
-                        logging.info(f"Found alternative slot for '{conflict['title']}': "
+                        logging.info(f"Found alternative slot for '{conflict['summary']}': "
                                    f"{conflict['new_slot_start'].strftime('%I:%M %p')} - "
                                    f"{conflict['new_slot_end'].strftime('%I:%M %p')}")
                     else:
-                        logging.info(f"Could not find alternative slot for '{conflict['title']}'")
+                        logging.info(f"Could not find alternative slot for '{conflict['summary']}'")
                         all_conflicts_resolvable = False
                 
                 # Only add the proposal if all conflicts are resolvable
@@ -346,12 +346,12 @@ class CalendarAgent:
             
             # Get and log the original description
             original_description = conflict.get('description', '')
-            logging.info(f"\nPreparing to move event: {conflict['title']}")
+            logging.info(f"\nPreparing to move event: {conflict['summary']}")
             
             # Create the moved event
             moved_events[conflict['id']] = {
                 'id': conflict['id'],
-                'title': conflict['title'],
+                'summary': conflict['summary'],
                 'start_time': conflict['new_slot_start'],
                 'end_time': conflict['new_slot_end'],
                 'attendees': conflict['attendees'],
@@ -360,7 +360,7 @@ class CalendarAgent:
                 'description': original_description
             }
             
-            logging.info(f"Created moved_events entry for '{conflict['title']}'")
+            logging.info(f"Created moved_events entry for '{conflict['summary']}'")
             logging.info(f"Original time: {original_time}")
             logging.info(f"New time: {conflict['new_slot_start'].strftime('%I:%M %p')} - {conflict['new_slot_end'].strftime('%I:%M %p')}")
                 
@@ -375,11 +375,11 @@ class CalendarAgent:
         Returns:
             True if deletion was successful, False otherwise
         """
-        logging.info(f"\nAttempting to delete conflict: {conflict['title']} (ID: {conflict['id']})")
+        logging.info(f"\nAttempting to delete conflict: {conflict['summary']} (ID: {conflict['id']})")
         logging.info(f"Original time: {conflict['start'].strftime('%Y-%m-%d %I:%M %p')} - {conflict['end'].strftime('%I:%M %p')}")
         
         if self.calendar.delete_event(conflict['id']):
-            logging.info(f"Successfully deleted original event: {conflict['title']} (ID: {conflict['id']})")
+            logging.info(f"Successfully deleted original event: {conflict['summary']} (ID: {conflict['id']})")
             return True
         else:
             logging.error(f"Failed to delete event with ID: {conflict['id']}")
@@ -427,14 +427,14 @@ class CalendarAgent:
             
             # Get and log the original description
             original_description = conflict.get('description', '')
-            logging.info(f"Processing conflict: {conflict['title']}")
+            logging.info(f"Processing conflict: {conflict['summary']}")
             
             # Format the new description with rescheduling note
             new_description = f"{original_description}\n\n(Rescheduled from {conflict['start'].strftime('%I:%M %p')} - {conflict['end'].strftime('%I:%M %p')} due to conflict)"
             
             # Create the rescheduled event with exact times
             rescheduled = self.calendar.create_event(
-                summary=conflict['title'],
+                summary=conflict['summary'],
                 start_time=start_time,
                 end_time=end_time,
                 description=new_description,
@@ -443,10 +443,10 @@ class CalendarAgent:
             )
             
             if rescheduled:
-                logging.info(f"Successfully created rescheduled event: {conflict['title']}")
+                logging.info(f"Successfully created rescheduled event: {conflict['summary']}")
                 rescheduled_events.append(rescheduled)
             else:
-                logging.error(f"Failed to create rescheduled event: {conflict['title']}")
+                logging.error(f"Failed to create rescheduled event: {conflict['summary']}")
                 
         return rescheduled_events
 
@@ -504,7 +504,7 @@ class CalendarAgent:
                 
                 # Create the moved event
                 moved_event = self.calendar.create_event(
-                    summary=event_data['title'],
+                    summary=event_data['summary'],
                     start_time=event_data['start_time'],
                     end_time=event_data['end_time'],
                     description=description,
@@ -516,10 +516,10 @@ class CalendarAgent:
                     self.calendar.delete_event(event['id'])
                     return {
                         "status": "error",
-                        "message": f"Failed to create moved event for {event_data['title']}"
+                        "message": f"Failed to create moved event for {event_data['summary']}"
                     }
                 
-                logging.info(f"Successfully recreated event '{event_data['title']}'")
+                logging.info(f"Successfully recreated event '{event_data['summary']}'")
             
             return {
                 "status": "success",
@@ -580,7 +580,7 @@ class CalendarAgent:
                 busy_periods.append({
                     'start': event_start,
                     'end': event_end,
-                    'title': event.get('summary', 'Untitled'),
+                    'summary': event.get('summary', 'Untitled'),
                     'attendees': event_attendees
                 })
         

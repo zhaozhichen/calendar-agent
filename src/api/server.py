@@ -102,9 +102,11 @@ app = FastAPI(title="Calendar Agent API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Allow all origins
-    allow_credentials=True,
-    allow_methods=["*"],  # Allow all methods
-    allow_headers=["*"],  # Allow all headers
+    allow_credentials=False,  # Set to False when using allow_origins=["*"]
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],  # Add HEAD method
+    allow_headers=["*"],  # Allow all headers for preflight compatibility
+    expose_headers=["*"],  # Expose all headers
+    max_age=86400,  # Cache preflight requests for 24 hours
 )
 
 # Pydantic model for meeting request
@@ -390,17 +392,14 @@ def _format_conflicts_info(conflicts: List[Dict[str, Any]], all_attendees: List[
         new_slot_end = conflict['new_slot_end'].astimezone()
         
         conflict_info = {
-            "id": conflict['id'],  # Include the original event ID
-            "title": conflict['title'],
-            "time": f"{conflict_start.strftime('%I:%M %p')} - {conflict_end.strftime('%I:%M %p')}",
-            "attendees": conflict['attendees'],
+            "id": conflict['id'],
+            "summary": conflict['summary'],
+            "start": conflict_start.strftime('%Y-%m-%d %I:%M %p'),
+            "end": conflict_end.strftime('%Y-%m-%d %I:%M %p'),
             "priority": conflict.get('priority', 'N/A'),
-            "new_time": f"{new_slot_start.strftime('%I:%M %p')} - {new_slot_end.strftime('%I:%M %p')}",
-            "description": conflict.get('description', ''),  # Include the description
-            "start": conflict_start,
-            "end": conflict_end,
-            "new_slot_start": new_slot_start,
-            "new_slot_end": new_slot_end
+            "attendees": conflict['attendees'],
+            "new_slot_start": new_slot_start.strftime('%Y-%m-%d %I:%M %p'),
+            "new_slot_end": new_slot_end.strftime('%Y-%m-%d %I:%M %p')
         }
         
         # Add each conflict to the list without deduplication
@@ -445,9 +444,9 @@ def _format_negotiation_message(proposal: Dict[str, Any], attendee_conflicts: Di
         if attendee in attendee_conflicts:
             message += f"Attendee ({attendee}) conflicts:\n"
             for conflict in attendee_conflicts[attendee]:
-                message += f"- {conflict['title']} (Priority: {conflict['priority']})\n"
-                message += f"  Current time: {conflict['time']}\n"
-                message += f"  Proposed time: {conflict['new_time']}\n"
+                message += f"- {conflict['summary']} (Priority: {conflict['priority']})\n"
+                message += f"  Current: {conflict['start']}\n"
+                message += f"  New: {conflict['new_slot_start']} - {conflict['new_slot_end']}\n"
                 message += f"  Attendees: {', '.join(conflict['attendees'])}\n\n"
     
     message += f"Total affected attendees: {', '.join(attendee_conflicts.keys())}\n"
@@ -543,11 +542,44 @@ async def request_meeting(email: str, request: MeetingRequest):
             )
             
             if event:
-                return {
-                    "status": "success",
-                    "message": f"Successfully scheduled meeting '{request.title}' at {earliest_perfect.proposed_start_time.strftime('%Y-%m-%d %I:%M %p')}",
-                    "event": event
+                # Format conflicts information
+                conflicts_info, attendee_conflicts = _format_conflicts_info(perfect_matches, all_attendees)
+                
+                # Create proposal object
+                proposal = {
+                    "id": str(uuid.uuid4()),
+                    "title": request.title,
+                    "start_time": earliest_perfect.proposed_start_time.isoformat(),
+                    "duration_minutes": request.duration_minutes,
+                    "organizer": request.organizer,
+                    "attendees": all_attendees,
+                    "conflicts": conflicts_info,
+                    "affected_attendees": earliest_perfect.affected_attendees,
+                    "priority": request.priority,
+                    "description": request.description,
+                    "impact_score": earliest_perfect.impact_score,
+                    "unique_conflicts_count": len(perfect_matches)  # Store the count
                 }
+                
+                # Create response object
+                response = {
+                    "status": "success",
+                    "message": f"Successfully scheduled meeting '{request.title}' with conflicts",
+                    "event": {
+                        "id": event['id'],
+                        "summary": request.title,
+                        "start": event['start']['dateTime'],
+                        "end": event['end']['dateTime'],
+                        "attendees": event['attendees']
+                    },
+                    "conflicts": conflicts_info,
+                    "moved_events": earliest_perfect.affected_attendees
+                }
+                
+                # Store in active negotiations
+                active_negotiations[proposal["id"]] = proposal
+                
+                return response
             else:
                 return {
                     "status": "error",
@@ -585,7 +617,7 @@ async def request_meeting(email: str, request: MeetingRequest):
                 for conflict_idx, (conflict_id, conflict) in enumerate(unique_conflicts.items(), 1):
                     logging.info(f"\nConflict {conflict_idx}:")
                     logging.info(f"- ID: {conflict_id}")
-                    logging.info(f"- Title: {conflict['title']}")
+                    logging.info(f"- Title: {conflict['summary']}")
                     logging.info(f"- Current Time: {conflict['start'].strftime('%I:%M %p')} - {conflict['end'].strftime('%I:%M %p')}")
                     logging.info(f"- New Time: {conflict['new_slot_start'].strftime('%I:%M %p')} - {conflict['new_slot_end'].strftime('%I:%M %p')}")
                     logging.info(f"- Priority: {conflict.get('priority', 'N/A')} (Requested Meeting Priority: {request.priority})")
