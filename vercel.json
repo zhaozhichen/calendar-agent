@@ -1,0 +1,30 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "src/run_server.py",
+      "use": "@vercel/python"
+    },
+    {
+      "src": "src/static/**",
+      "use": "@vercel/static"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/static/(.*)",
+      "dest": "/src/static/$1"
+    },
+    {
+      "src": "/(css|js)/(.*)",
+      "dest": "/src/static/$1/$2"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "src/run_server.py"
+    }
+  ],
+  "env": {
+    "PYTHONPATH": "."
+  }
+} 

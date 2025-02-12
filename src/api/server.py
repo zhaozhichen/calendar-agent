@@ -375,7 +375,7 @@ def _format_conflicts_info(conflicts: List[Dict[str, Any]], all_attendees: List[
     """Format conflicts information for negotiation.
     
     Args:
-        conflicts: List of conflicts
+        conflicts: List of conflicts (can be dictionaries or MeetingProposal objects)
         all_attendees: List of all attendees
         
     Returns:
@@ -385,34 +385,60 @@ def _format_conflicts_info(conflicts: List[Dict[str, Any]], all_attendees: List[
     attendee_conflicts = {}
     
     for conflict in conflicts:
-        # Convert times to local timezone
-        conflict_start = datetime.fromisoformat(conflict['start'].isoformat()).astimezone()
-        conflict_end = datetime.fromisoformat(conflict['end'].isoformat()).astimezone()
-        new_slot_start = conflict['new_slot_start'].astimezone()
-        new_slot_end = conflict['new_slot_end'].astimezone()
-        
-        conflict_info = {
-            "id": conflict['id'],
-            "summary": conflict['summary'],
-            "start": conflict_start.strftime('%Y-%m-%d %I:%M %p'),
-            "end": conflict_end.strftime('%Y-%m-%d %I:%M %p'),
-            "priority": conflict.get('priority', 'N/A'),
-            "attendees": conflict['attendees'],
-            "new_slot_start": new_slot_start.strftime('%Y-%m-%d %I:%M %p'),
-            "new_slot_end": new_slot_end.strftime('%Y-%m-%d %I:%M %p')
-        }
-        
-        # Add each conflict to the list without deduplication
-        conflicts_info.append(conflict_info)
-        
-        # Add conflict to each affected attendee's list
-        for attendee in conflict['attendees']:
-            if attendee in all_attendees:
-                if attendee not in attendee_conflicts:
-                    attendee_conflicts[attendee] = []
-                attendee_conflicts[attendee].append(conflict_info)
+        if isinstance(conflict, MeetingProposal):
+            # Skip MeetingProposal objects that don't have conflicts
+            if not conflict.conflicts:
+                continue
+            # Process each conflict within the MeetingProposal
+            for inner_conflict in conflict.conflicts:
+                conflict_info = _format_single_conflict(inner_conflict)
+                conflicts_info.append(conflict_info)
+                
+                # Add conflict to each affected attendee's list
+                for attendee in inner_conflict['attendees']:
+                    if attendee in all_attendees:
+                        if attendee not in attendee_conflicts:
+                            attendee_conflicts[attendee] = []
+                        attendee_conflicts[attendee].append(conflict_info)
+        else:
+            # Process dictionary conflict
+            conflict_info = _format_single_conflict(conflict)
+            conflicts_info.append(conflict_info)
+            
+            # Add conflict to each affected attendee's list
+            for attendee in conflict['attendees']:
+                if attendee in all_attendees:
+                    if attendee not in attendee_conflicts:
+                        attendee_conflicts[attendee] = []
+                    attendee_conflicts[attendee].append(conflict_info)
     
     return conflicts_info, attendee_conflicts
+
+def _format_single_conflict(conflict: Dict[str, Any]) -> Dict[str, Any]:
+    """Format a single conflict entry.
+    
+    Args:
+        conflict: Single conflict dictionary
+        
+    Returns:
+        Formatted conflict information
+    """
+    # Convert times to local timezone
+    conflict_start = datetime.fromisoformat(conflict['start'].isoformat()).astimezone() if isinstance(conflict['start'], datetime) else datetime.fromisoformat(conflict['start']).astimezone()
+    conflict_end = datetime.fromisoformat(conflict['end'].isoformat()).astimezone() if isinstance(conflict['end'], datetime) else datetime.fromisoformat(conflict['end']).astimezone()
+    new_slot_start = datetime.fromisoformat(conflict['new_slot_start'].isoformat()).astimezone() if isinstance(conflict['new_slot_start'], datetime) else datetime.fromisoformat(conflict['new_slot_start']).astimezone()
+    new_slot_end = datetime.fromisoformat(conflict['new_slot_end'].isoformat()).astimezone() if isinstance(conflict['new_slot_end'], datetime) else datetime.fromisoformat(conflict['new_slot_end']).astimezone()
+    
+    return {
+        "id": conflict['id'],
+        "summary": conflict['summary'],
+        "start": conflict_start.strftime('%Y-%m-%d %I:%M %p'),
+        "end": conflict_end.strftime('%Y-%m-%d %I:%M %p'),
+        "priority": conflict.get('priority', 'N/A'),
+        "attendees": conflict['attendees'],
+        "new_slot_start": new_slot_start.strftime('%Y-%m-%d %I:%M %p'),
+        "new_slot_end": new_slot_end.strftime('%Y-%m-%d %I:%M %p')
+    }
 
 def _format_negotiation_message(proposal: Dict[str, Any], attendee_conflicts: Dict[str, List[Dict[str, Any]]]) -> str:
     """Format negotiation message with conflicts.
@@ -713,7 +739,6 @@ async def negotiate_meeting(email: str, proposal_id: str, action: str):
             # Create MeetingProposal object from stored data
             proposed_start = datetime.fromisoformat(proposal["start_time"])
             proposed_end = proposed_start + timedelta(minutes=proposal["duration_minutes"])
-            base_date = proposed_start.date()
             
             meeting_request = MeetingRequest(
                 title=proposal["title"],
@@ -724,15 +749,23 @@ async def negotiate_meeting(email: str, proposal_id: str, action: str):
                 preferred_time_ranges=[[proposed_start.isoformat(), proposed_end.isoformat()]]
             )
             
+            def parse_datetime(dt_str: str) -> datetime:
+                try:
+                    # Try ISO format first
+                    return datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
+                except ValueError:
+                    # Try human-readable format
+                    return datetime.strptime(dt_str, '%Y-%m-%d %I:%M %p')
+            
             meeting_proposal = MeetingProposal(
                 request=meeting_request,
                 proposed_start_time=proposed_start,
                 conflicts=[{
                     **conflict,
-                    'start': datetime.combine(base_date, parse_time_str(conflict['time'].split(' - ')[0]).time()),
-                    'end': datetime.combine(base_date, parse_time_str(conflict['time'].split(' - ')[1]).time()),
-                    'new_slot_start': datetime.combine(base_date, parse_time_str(conflict['new_time'].split(' - ')[0]).time()),
-                    'new_slot_end': datetime.combine(base_date, parse_time_str(conflict['new_time'].split(' - ')[1]).time())
+                    'start': parse_datetime(conflict['start']),
+                    'end': parse_datetime(conflict['end']),
+                    'new_slot_start': parse_datetime(conflict['new_slot_start']),
+                    'new_slot_end': parse_datetime(conflict['new_slot_end'])
                 } for conflict in proposal["conflicts"]],
                 affected_attendees=proposal["affected_attendees"],
                 impact_score=len(proposal["conflicts"]) + len(proposal["affected_attendees"]) * 0.5
