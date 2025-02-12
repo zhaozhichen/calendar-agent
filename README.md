@@ -2,7 +2,7 @@
 
 An intelligent calendar management system that uses AI agents to coordinate and optimize meeting schedules across multiple participants.
 
-Test server available at: https://calendar-agent.onrender.com
+Test server available at: https://calendar-agent.onrender.com (Chrome only)
 
 ## Features
 
@@ -35,8 +35,6 @@ PORT=8000  # Optional, defaults to 8000
 ```
 
 ## Running Locally
-
-### Development Server
 
 1. Start the server:
 ```bash
